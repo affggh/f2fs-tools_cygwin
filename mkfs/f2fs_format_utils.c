@@ -14,7 +14,6 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include <linux/fs.h>
 
 #include "f2fs_fs.h"
 
@@ -48,6 +47,7 @@ int f2fs_trim_device()
 		return -1;
 	}
 
+#if defined(BLKDISCARD)
 	MSG(0, "Info: Discarding device\n");
 	if (S_ISREG(stat_buf.st_mode))
 		return 0;
@@ -56,6 +56,7 @@ int f2fs_trim_device()
 			MSG(0, "Info: This device doesn't support TRIM\n");
 	} else
 		return -1;
+#endif
 	return 0;
 }
 
