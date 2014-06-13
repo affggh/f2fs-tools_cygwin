@@ -882,7 +882,5 @@ exit:
 	if (err)
 		MSG(0, "\tError: Could not format the device!!!\n");
 
-	f2fs_finalize_device();
-
 	return err;
 }
