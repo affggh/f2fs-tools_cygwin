@@ -77,6 +77,21 @@ include $(BUILD_EXECUTABLE)
 
 #----------------------------------------------------------
 include $(CLEAR_VARS)
+LOCAL_MODULE := make_f2fs
+
+LOCAL_SRC_FILES := \
+	lib/libf2fs_io.c \
+	mkfs/f2fs_format_main.c
+LOCAL_C_INCLUDES := $(common_C_INCLUDES)
+LOCAL_CFLAGS := $(version_CFLAGS)
+LOCAL_STATIC_LIBRARIES := libf2fs_fmt
+LOCAL_SHARED_LIBRARIES := libext2_uuid
+LOCAL_SYSTEM_SHARED_LIBRARIES := libc
+LOCAL_MODULE_TAGS := optional
+include $(BUILD_EXECUTABLE)
+
+#----------------------------------------------------------
+include $(CLEAR_VARS)
 # The LOCAL_MODULE name is referenced by the code. Don't change it.
 LOCAL_MODULE := fsck.f2fs
 LOCAL_SRC_FILES := \
