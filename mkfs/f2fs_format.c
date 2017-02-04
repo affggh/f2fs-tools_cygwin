@@ -117,6 +117,24 @@ next:
 	free(c.extension_list);
 }
 
+static void verify_cur_segs(void)
+{
+	int i, j;
+
+	for (i = 0; i < NR_CURSEG_TYPE; i++) {
+		for (j = 0; j < NR_CURSEG_TYPE; j++)
+			if (c.cur_seg[i] == c.cur_seg[j])
+				break;
+	}
+
+	if (i == NR_CURSEG_TYPE && j == NR_CURSEG_TYPE)
+		return;
+
+	c.cur_seg[0] = 0;
+	for (i = 1; i < NR_CURSEG_TYPE; i++)
+		c.cur_seg[i] = next_zone(i - 1);
+}
+
 static int f2fs_prepare_super_block(void)
 {
 	u_int32_t blk_size_bytes;
@@ -337,10 +355,6 @@ static int f2fs_prepare_super_block(void)
 	if (c.overprovision == 0)
 		c.overprovision = get_best_overprovision(sb);
 
-	c.reserved_segments =
-			(2 * (100 / c.overprovision + 1) + 6)
-			* c.segs_per_sec;
-
 	if (c.overprovision == 0 || c.total_segments < F2FS_MIN_SEGMENTS ||
 		(c.devices[0].total_sectors *
 			c.sector_size < zone_align_start_offset) ||
@@ -348,6 +362,10 @@ static int f2fs_prepare_super_block(void)
 		MSG(0, "\tError: Device size is not sufficient for F2FS volume\n");
 		return -1;
 	}
+
+	c.reserved_segments =
+			(2 * (100 / c.overprovision + 1) + 6)
+			* c.segs_per_sec;
 
 	uuid_generate(sb->uuid);
 
@@ -376,9 +394,16 @@ static int f2fs_prepare_super_block(void)
 		c.cur_seg[CURSEG_WARM_NODE] = next_zone(CURSEG_HOT_NODE);
 		c.cur_seg[CURSEG_COLD_NODE] = next_zone(CURSEG_WARM_NODE);
 		c.cur_seg[CURSEG_HOT_DATA] = next_zone(CURSEG_COLD_NODE);
-		c.cur_seg[CURSEG_COLD_DATA] = next_zone(CURSEG_HOT_DATA);
-		c.cur_seg[CURSEG_WARM_DATA] = next_zone(CURSEG_COLD_DATA);
+		c.cur_seg[CURSEG_COLD_DATA] =
+				max(last_zone((total_zones >> 2)),
+					next_zone(CURSEG_COLD_NODE));
+		c.cur_seg[CURSEG_WARM_DATA] =
+				max(last_zone((total_zones >> 1)),
+					next_zone(CURSEG_COLD_DATA));
 	}
+
+	/* if there is redundancy, reassign it */
+	verify_cur_segs();
 
 	cure_extension_list();
 
@@ -472,8 +497,10 @@ static int f2fs_write_check_point_pack(void)
 	struct f2fs_summary_block *sum = NULL;
 	struct f2fs_journal *journal;
 	u_int32_t blk_size_bytes;
+	u_int32_t nat_bits_bytes, nat_bits_blocks;
+	unsigned char *nat_bits = NULL, *empty_nat_bits;
 	u_int64_t cp_seg_blk = 0;
-	u_int32_t crc = 0;
+	u_int32_t crc = 0, flags;
 	unsigned int i;
 	char *cp_payload = NULL;
 	char *sum_compact, *sum_compact_p;
@@ -499,10 +526,19 @@ static int f2fs_write_check_point_pack(void)
 	}
 	sum_compact_p = sum_compact;
 
+	nat_bits_bytes = get_sb(segment_count_nat) << 5;
+	nat_bits_blocks = F2FS_BYTES_TO_BLK((nat_bits_bytes << 1) + 8 +
+						F2FS_BLKSIZE - 1);
+	nat_bits = calloc(F2FS_BLKSIZE, nat_bits_blocks);
+	if (nat_bits == NULL) {
+		MSG(1, "\tError: Calloc Failed for nat bits buffer!!!\n");
+		goto free_sum_compact;
+	}
+
 	cp_payload = calloc(F2FS_BLKSIZE, 1);
 	if (cp_payload == NULL) {
 		MSG(1, "\tError: Calloc Failed for cp_payload!!!\n");
-		goto free_sum_compact;
+		goto free_nat_bits;
 	}
 
 	/* 1. cp page 1 of checkpoint pack 1 */
@@ -539,7 +575,15 @@ static int f2fs_write_check_point_pack(void)
 			get_cp(overprov_segment_count)) * c.blks_per_seg));
 	/* cp page (2), data summaries (1), node summaries (3) */
 	set_cp(cp_pack_total_block_count, 6 + get_sb(cp_payload));
-	set_cp(ckpt_flags, CP_UMOUNT_FLAG | CP_COMPACT_SUM_FLAG);
+	flags = CP_UMOUNT_FLAG | CP_COMPACT_SUM_FLAG;
+	if (get_cp(cp_pack_total_block_count) <=
+			(1 << get_sb(log_blocks_per_seg)) - nat_bits_blocks)
+		flags |= CP_NAT_BITS_FLAG;
+
+	if (c.trimmed)
+		flags |= CP_TRIMMED_FLAG;
+
+	set_cp(ckpt_flags, flags);
 	set_cp(cp_pack_start_sum, 1 + get_sb(cp_payload));
 	set_cp(valid_node_count, 1);
 	set_cp(valid_inode_count, 1);
@@ -702,6 +746,31 @@ static int f2fs_write_check_point_pack(void)
 		goto free_cp_payload;
 	}
 
+	/* write NAT bits, if possible */
+	if (flags & CP_NAT_BITS_FLAG) {
+		uint32_t i;
+
+		*(__le64 *)nat_bits = get_cp_crc(cp);
+		empty_nat_bits = nat_bits + 8 + nat_bits_bytes;
+		memset(empty_nat_bits, 0xff, nat_bits_bytes);
+		test_and_clear_bit_le(0, empty_nat_bits);
+
+		/* write the last blocks in cp pack */
+		cp_seg_blk = get_sb(segment0_blkaddr) + (1 <<
+				get_sb(log_blocks_per_seg)) - nat_bits_blocks;
+
+		DBG(1, "\tWriting NAT bits pages, at offset 0x%08"PRIx64"\n",
+					cp_seg_blk);
+
+		for (i = 0; i < nat_bits_blocks; i++) {
+			if (dev_write_block(nat_bits + i *
+						F2FS_BLKSIZE, cp_seg_blk + i)) {
+				MSG(1, "\tError: write NAT bits to disk!!!\n");
+				goto free_cp_payload;
+			}
+		}
+	}
+
 	/* cp page 1 of check point pack 2
 	 * Initiatialize other checkpoint pack with version zero
 	 */
@@ -741,6 +810,8 @@ static int f2fs_write_check_point_pack(void)
 
 free_cp_payload:
 	free(cp_payload);
+free_nat_bits:
+	free(nat_bits);
 free_sum_compact:
 	free(sum_compact);
 free_sum:
@@ -775,6 +846,12 @@ static int f2fs_write_super_block(void)
 #ifndef WITH_ANDROID
 static int discard_obsolete_dnode(struct f2fs_node *raw_node, u_int64_t offset)
 {
+	u_int64_t next_blkaddr = 0;
+	u_int64_t root_inode_pos = get_sb(main_blkaddr);
+
+	/* only root inode was written before truncating dnodes */
+	root_inode_pos += c.cur_seg[CURSEG_HOT_NODE] * c.blks_per_seg;
+
 	if (c.zoned_mode)
 		return 0;
 	do {
@@ -787,6 +864,7 @@ static int discard_obsolete_dnode(struct f2fs_node *raw_node, u_int64_t offset)
 			return -1;
 		}
 
+		next_blkaddr = le32_to_cpu(raw_node->footer.next_blkaddr);
 		memset(raw_node, 0, F2FS_BLKSIZE);
 
 		DBG(1, "\tDiscard dnode, at offset 0x%08"PRIx64"\n", offset);
@@ -794,7 +872,10 @@ static int discard_obsolete_dnode(struct f2fs_node *raw_node, u_int64_t offset)
 			MSG(1, "\tError: While discarding direct node!!!\n");
 			return -1;
 		}
-		offset = le32_to_cpu(raw_node->footer.next_blkaddr);
+		offset = next_blkaddr;
+		/* should avoid recursive chain due to stale data */
+		if (offset == root_inode_pos)
+			break;
 	} while (1);
 
 	return 0;

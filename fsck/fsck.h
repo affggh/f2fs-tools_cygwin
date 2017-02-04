@@ -119,7 +119,7 @@ struct selabel_handle;
 
 extern int fsck_chk_orphan_node(struct f2fs_sb_info *);
 extern int fsck_chk_node_blk(struct f2fs_sb_info *, struct f2fs_inode *, u32,
-		u8 *, enum FILE_TYPE, enum NODE_TYPE, u32 *,
+		enum FILE_TYPE, enum NODE_TYPE, u32 *,
 		struct child_info *);
 extern void fsck_chk_inode_blk(struct f2fs_sb_info *, u32, enum FILE_TYPE,
 		struct f2fs_node *, u32 *, struct node_info *);
@@ -177,6 +177,11 @@ extern struct f2fs_sit_block *get_current_sit_page(struct f2fs_sb_info *,
 			unsigned int);
 extern void rewrite_current_sit_page(struct f2fs_sb_info *, unsigned int,
 			struct f2fs_sit_block *);
+
+extern u32 update_nat_bits_flags(struct f2fs_super_block *,
+				struct f2fs_checkpoint *, u32);
+extern void write_nat_bits(struct f2fs_sb_info *, struct f2fs_super_block *,
+			struct f2fs_checkpoint *, int);
 
 /* dump.c */
 struct dump_option {

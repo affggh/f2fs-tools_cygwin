@@ -415,6 +415,7 @@ static void rebuild_checkpoint(struct f2fs_sb_info *sbi,
 			struct f2fs_super_block *new_sb, unsigned int offset)
 {
 	struct f2fs_checkpoint *cp = F2FS_CKPT(sbi);
+	unsigned long long cp_ver = get_cp(checkpoint_ver);
 	struct f2fs_checkpoint *new_cp;
 	struct f2fs_super_block *sb = F2FS_RAW_SUPER(sbi);
 	unsigned int free_segment_count, new_segment_count;
@@ -422,6 +423,7 @@ static void rebuild_checkpoint(struct f2fs_sb_info *sbi,
 	block_t orphan_blks = 0;
 	block_t new_cp_blk_no, old_cp_blk_no;
 	u_int32_t crc = 0;
+	u32 flags;
 	void *buf;
 	int i, ret;
 
@@ -474,11 +476,17 @@ static void rebuild_checkpoint(struct f2fs_sb_info *sbi,
 			((get_newsb(segment_count_nat) / 2) <<
 			get_newsb(log_blocks_per_seg)) / 8);
 
+	/* update nat_bits flag */
+	flags = update_nat_bits_flags(new_sb, cp, get_cp(ckpt_flags));
+	set_cp(ckpt_flags, flags);
+
 	memcpy(new_cp, cp, (unsigned char *)cp->sit_nat_version_bitmap -
 						(unsigned char *)cp);
+	new_cp->checkpoint_ver = cpu_to_le64(cp_ver + 1);
 
 	crc = f2fs_cal_crc32(F2FS_SUPER_MAGIC, new_cp, CHECKSUM_OFFSET);
-	*((__le32 *)((unsigned char *)new_cp + CHECKSUM_OFFSET)) = cpu_to_le32(crc);
+	*((__le32 *)((unsigned char *)new_cp + CHECKSUM_OFFSET)) =
+							cpu_to_le32(crc);
 
 	/* Write a new checkpoint in the other set */
 	new_cp_blk_no = old_cp_blk_no = get_sb(cp_blkaddr);
@@ -518,6 +526,10 @@ static void rebuild_checkpoint(struct f2fs_sb_info *sbi,
 	/* write the last cp */
 	ret = dev_write_block(new_cp, new_cp_blk_no++);
 	ASSERT(ret >= 0);
+
+	/* Write nat bits */
+	if (flags & CP_NAT_BITS_FLAG)
+		write_nat_bits(sbi, new_sb, new_cp, sbi->cur_cp == 1 ? 2 : 1);
 
 	/* disable old checkpoint */
 	memset(buf, 0, BLOCK_SZ);

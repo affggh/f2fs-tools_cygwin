@@ -568,9 +568,10 @@ void f2fs_init_configuration(void)
 	c.segs_per_sec = 1;
 	c.secs_per_zone = 1;
 	c.segs_per_zone = 1;
-	c.heap = 1;
+	c.heap = 0;
 	c.vol_label = "";
 	c.trim = 1;
+	c.trimmed = 0;
 	c.ro = 0;
 	c.kd = -1;
 }
@@ -730,10 +731,12 @@ int get_device_info(int i)
 #endif
 		dev->total_sectors /= dev->sector_size;
 
-		if (ioctl(fd, HDIO_GETGEO, &geom) < 0)
-			c.start_sector = 0;
-		else
-			c.start_sector = geom.start;
+		if (i == 0) {
+			if (ioctl(fd, HDIO_GETGEO, &geom) < 0)
+				c.start_sector = 0;
+			else
+				c.start_sector = geom.start;
+		}
 
 #ifndef WITH_ANDROID
 		/* Send INQUIRY command */
