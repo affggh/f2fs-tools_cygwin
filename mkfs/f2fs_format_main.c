@@ -17,28 +17,36 @@
 #include <sys/mount.h>
 #include <time.h>
 #include <uuid/uuid.h>
+#include <errno.h>
+
+#include "config.h"
+#ifdef HAVE_LIBBLKID
+#  include <blkid/blkid.h>
+#endif
 
 #include "f2fs_fs.h"
 #include "f2fs_format_utils.h"
 
 extern struct f2fs_configuration c;
+static int force_overwrite = 0;
 
 static void mkfs_usage()
 {
 	MSG(0, "\nUsage: mkfs.f2fs [options] device [sectors]\n");
 	MSG(0, "[options]:\n");
-	MSG(0, "  -a heap-based allocation [default:1]\n");
+	MSG(0, "  -a heap-based allocation [default:0]\n");
 	MSG(0, "  -c [device path] up to 7 devices excepts meta device\n");
 	MSG(0, "  -d debug level [default:0]\n");
 	MSG(0, "  -e [extension list] e.g. \"mp3,gif,mov\"\n");
+	MSG(0, "  -f force overwrite the exist filesystem\n");
 	MSG(0, "  -l label\n");
+	MSG(0, "  -m support zoned block device [default:0]\n");
 	MSG(0, "  -o overprovision ratio [default:5]\n");
-	MSG(0, "  -O set feature\n");
+	MSG(0, "  -O [feature list] e.g. \"encrypt\"\n");
 	MSG(0, "  -q quiet mode\n");
 	MSG(0, "  -s # of segments per section [default:1]\n");
-	MSG(0, "  -z # of sections per zone [default:1]\n");
 	MSG(0, "  -t 0: nodiscard, 1: discard [default:1]\n");
-	MSG(0, "  -m support zoned block device [default:0]\n");
+	MSG(0, "  -z # of sections per zone [default:1]\n");
 	MSG(0, "sectors: number of sectors. [default: determined by device size]\n");
 	exit(1);
 }
@@ -62,6 +70,8 @@ static void f2fs_show_info()
 
 static void parse_feature(const char *features)
 {
+	while (*features == ' ')
+		features++;
 	if (!strcmp(features, "encrypt")) {
 		c.feature |= cpu_to_le32(F2FS_FEATURE_ENCRYPT);
 	} else {
@@ -72,7 +82,7 @@ static void parse_feature(const char *features)
 
 static void f2fs_parse_options(int argc, char *argv[])
 {
-	static const char *option_string = "qa:c:d:e:l:mo:O:s:z:t:";
+	static const char *option_string = "qa:c:d:e:l:mo:O:s:z:t:f";
 	int32_t option=0;
 
 	while ((option = getopt(argc,argv,option_string)) != EOF) {
@@ -128,6 +138,9 @@ static void f2fs_parse_options(int argc, char *argv[])
 		case 't':
 			c.trim = atoi(optarg);
 			break;
+		case 'f':
+			force_overwrite = 1;
+			break;
 		default:
 			MSG(0, "\tError: Unknown option %c\n",option);
 			mkfs_usage();
@@ -155,6 +168,79 @@ static void f2fs_parse_options(int argc, char *argv[])
 		c.feature |= cpu_to_le32(F2FS_FEATURE_BLKZONED);
 }
 
+#ifdef HAVE_LIBBLKID
+static int f2fs_dev_is_overwrite(const char *device)
+{
+	const char	*type;
+	blkid_probe	pr = NULL;
+	int		ret = -1;
+
+	if (!device || !*device)
+		return 0;
+
+	pr = blkid_new_probe_from_filename(device);
+	if (!pr)
+		goto out;
+
+	ret = blkid_probe_enable_partitions(pr, 1);
+	if (ret < 0)
+		goto out;
+
+	ret = blkid_do_fullprobe(pr);
+	if (ret < 0)
+		goto out;
+
+	/*
+	 * Blkid returns 1 for nothing found and 0 when it finds a signature,
+	 * but we want the exact opposite, so reverse the return value here.
+	 *
+	 * In addition print some useful diagnostics about what actually is
+	 * on the device.
+	 */
+	if (ret) {
+		ret = 0;
+		goto out;
+	}
+
+	if (!blkid_probe_lookup_value(pr, "TYPE", &type, NULL)) {
+		MSG(0, "\t%s appears to contain an existing filesystem (%s).\n",
+			device, type);
+	} else if (!blkid_probe_lookup_value(pr, "PTTYPE", &type, NULL)) {
+		MSG(0, "\t%s appears to contain a partition table (%s).\n",
+			device, type);
+	} else {
+		MSG(0, "\t%s appears to contain something weird according to blkid\n",
+			device);
+	}
+	ret = 1;
+out:
+	if (pr)
+		blkid_free_probe(pr);
+	if (ret == -1)
+		MSG(0, "\tprobe of %s failed, cannot detect existing filesystem.\n",
+			device);
+	return ret;
+}
+
+static int f2fs_check_overwrite(void)
+{
+	int i;
+
+	for (i = 0; i < c.ndevs; i++)
+		if (f2fs_dev_is_overwrite((char *)c.devices[i].path))
+			return -1;
+	return 0;
+}
+
+#else
+
+static int f2fs_check_overwrite(void)
+{
+	return 0;
+}
+
+#endif /* HAVE_LIBBLKID */
+
 int main(int argc, char *argv[])
 {
 	f2fs_init_configuration();
@@ -163,8 +249,14 @@ int main(int argc, char *argv[])
 
 	f2fs_show_info();
 
+	if (!force_overwrite && f2fs_check_overwrite()) {
+		MSG(0, "\tUse the -f option to force overwrite.\n");
+		return -1;
+	}
+
 	if (f2fs_devs_are_umounted() < 0) {
-		MSG(0, "\tError: Not available on mounted device!\n");
+		if (errno != EBUSY)
+			MSG(0, "\tError: Not available on mounted device!\n");
 		return -1;
 	}
 
