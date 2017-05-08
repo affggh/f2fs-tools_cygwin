@@ -2,7 +2,7 @@
 .\"             http://www.samsung.com/
 .\"  Written by Jaegeuk Kim <jaegeuk.kim@samsung.com>
 .\"
-.TH MKFS.F2FS 8 "January 2013" "f2fs-tools version 1.2.0"
+.TH MKFS.F2FS 8
 .SH NAME
 mkfs.f2fs \- create an F2FS file system
 .SH SYNOPSIS
@@ -10,6 +10,10 @@ mkfs.f2fs \- create an F2FS file system
 [
 .B \-a
 .I heap-based-allocation
+]
+[
+.B \-c
+.I device
 ]
 [
 .B \-l
@@ -21,7 +25,7 @@ mkfs.f2fs \- create an F2FS file system
 ]
 [
 .B \-s
-.I log-based-#-of-segments-per-section
+.I #-of-segments-per-section
 ]
 [
 .B \-z
@@ -36,11 +40,13 @@ mkfs.f2fs \- create an F2FS file system
 .I debugging-level
 ]
 .I device
+.I [sectors]
 .SH DESCRIPTION
 .B mkfs.f2fs
 is used to create a f2fs file system (usually in a disk partition).
 \fIdevice\fP is the special file corresponding to the device (e.g.
 \fI/dev/sdXX\fP).
+\fIsectors\fP is optionally given for specifing the filesystem size.
 .PP
 The exit code returned by
 .B mkfs.f2fs
@@ -53,17 +59,22 @@ If the value is equal to 1, each of active log areas are initially
 assigned separately according to the whole volume size.
 The default value is 1.
 .TP
+.BI \-c " device"
+Build f2fs with this device additionally, so that user can see all
+the devices as one big volume.
+.TP
 .BI \-l " volume-label"
 Specify the volume label to the partition mounted as F2FS.
 .TP
 .BI \-o " overprovision-ratio-percentage"
 Specify the percentage over the volume size for overprovision area. This area
-is hidden to users, and utilized by F2FS cleaner. The default percentage is 5%.
+is hidden to users, and utilized by F2FS cleaner. If not specified, the best
+number will be assigned automatically accoring to the partition size.
 .TP
-.BI \-s " log-based-#-of-segments-per-section"
-Specify the log-based number of segments per section. A section consists of
+.BI \-s " #-of-segments-per-section"
+Specify the number of segments per section. A section consists of
 multiple consecutive segments, and is the unit of garbage collection.
-The default number is 0, which means one segment is assigned to a section.
+The default number is 1, which means one segment is assigned to a section.
 .TP
 .BI \-z " #-of-sections-per-zone"
 Specify the number of sections per zone. A zone consists of multiple sections.
@@ -88,4 +99,9 @@ has been written by Jaegeuk Kim <jaegeuk.kim@samsung.com>.
 .B mkfs.f2fs
 is available from git://git.kernel.org/pub/scm/linux/kernel/git/jaegeuk/f2fs-tools.git.
 .SH SEE ALSO
-.BR mkfs (8).
+.BR mkfs (8),
+.BR fsck.f2fs(8),
+.BR dump.f2fs(8),
+.BR defrag.f2fs(8),
+.BR resize.f2fs(8),
+.BR sload.f2fs(8).
