@@ -6,6 +6,9 @@ ifeq ($(HOST_OS),linux)
 # The versions depend on $(LOCAL_PATH)/VERSION
 version_CFLAGS := -DF2FS_MAJOR_VERSION=1 -DF2FS_MINOR_VERSION=8 -DF2FS_TOOLS_VERSION=\"1.8.0\" -DF2FS_TOOLS_DATE=\"2017-02-03\"
 common_CFLAGS := -DWITH_ANDROID $(version_CFLAGS)
+# Workaround for the <sys/types.h>/<sys/sysmacros.h> split, here now for
+# bionic and coming later for glibc.
+target_CFLAGS := $(common_CFLAGS) -include sys/sysmacros.h
 
 # external/e2fsprogs/lib is needed for uuid/uuid.h
 common_C_INCLUDES := $(LOCAL_PATH)/include external/e2fsprogs/lib/
@@ -19,7 +22,7 @@ LOCAL_SRC_FILES := \
 	mkfs/f2fs_format_utils.c \
 
 LOCAL_C_INCLUDES := $(common_C_INCLUDES)
-LOCAL_CFLAGS := $(common_CFLAGS)
+LOCAL_CFLAGS := $(target_CFLAGS)
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include $(LOCAL_PATH)/mkfs
 include $(BUILD_STATIC_LIBRARY)
 
@@ -70,7 +73,7 @@ LOCAL_SRC_FILES := \
 	lib/libf2fs_io.c \
 	mkfs/f2fs_format_main.c
 LOCAL_C_INCLUDES := $(common_C_INCLUDES)
-LOCAL_CFLAGS := $(common_CFLAGS)
+LOCAL_CFLAGS := $(target_CFLAGS)
 LOCAL_STATIC_LIBRARIES := libc libf2fs_fmt libext2_uuid
 LOCAL_MODULE_TAGS := optional
 include $(BUILD_EXECUTABLE)
@@ -83,7 +86,7 @@ LOCAL_SRC_FILES := \
 	lib/libf2fs_io.c \
 	mkfs/f2fs_format_main.c
 LOCAL_C_INCLUDES := $(common_C_INCLUDES)
-LOCAL_CFLAGS := $(common_CFLAGS)
+LOCAL_CFLAGS := $(target_CFLAGS)
 LOCAL_STATIC_LIBRARIES := libf2fs_fmt
 LOCAL_SHARED_LIBRARIES := libext2_uuid
 LOCAL_SYSTEM_SHARED_LIBRARIES := libc
@@ -103,7 +106,7 @@ LOCAL_SRC_FILES := \
 	lib/libf2fs_io.c \
 
 LOCAL_C_INCLUDES := $(common_C_INCLUDES)
-LOCAL_CFLAGS := $(common_CFLAGS)
+LOCAL_CFLAGS := $(target_CFLAGS)
 LOCAL_SHARED_LIBRARIES := libext2_uuid
 LOCAL_SYSTEM_SHARED_LIBRARIES := libc
 LOCAL_MODULE_TAGS := optional
