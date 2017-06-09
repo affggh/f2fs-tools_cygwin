@@ -11,7 +11,7 @@ common_CFLAGS := -DWITH_ANDROID $(version_CFLAGS)
 target_CFLAGS := $(common_CFLAGS) -include sys/sysmacros.h
 
 # external/e2fsprogs/lib is needed for uuid/uuid.h
-common_C_INCLUDES := $(LOCAL_PATH)/include external/e2fsprogs/lib/
+common_C_INCLUDES := $(LOCAL_PATH)/include external/e2fsprogs/lib/ system/core/libsparse/include
 
 #----------------------------------------------------------
 include $(CLEAR_VARS)
@@ -52,10 +52,10 @@ LOCAL_C_INCLUDES := $(common_C_INCLUDES)
 LOCAL_CFLAGS := $(common_CFLAGS)
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include $(LOCAL_PATH)/mkfs
 LOCAL_STATIC_LIBRARIES := \
-     libf2fs_ioutils_host \
-     libext2_uuid \
-     libsparse \
-     libz
+	libf2fs_ioutils_host \
+	libext2_uuid \
+	libsparse \
+	libz
 # LOCAL_LDLIBS := -ldl
 include $(BUILD_HOST_SHARED_LIBRARY)
 
@@ -74,7 +74,11 @@ LOCAL_SRC_FILES := \
 	mkfs/f2fs_format_main.c
 LOCAL_C_INCLUDES := $(common_C_INCLUDES)
 LOCAL_CFLAGS := $(target_CFLAGS)
-LOCAL_STATIC_LIBRARIES := libc libf2fs_fmt libext2_uuid
+LOCAL_STATIC_LIBRARIES := \
+	libf2fs_fmt \
+	libext2_uuid \
+	libsparse \
+	libz
 LOCAL_MODULE_TAGS := optional
 include $(BUILD_EXECUTABLE)
 
@@ -88,10 +92,24 @@ LOCAL_SRC_FILES := \
 LOCAL_C_INCLUDES := $(common_C_INCLUDES)
 LOCAL_CFLAGS := $(target_CFLAGS)
 LOCAL_STATIC_LIBRARIES := libf2fs_fmt
-LOCAL_SHARED_LIBRARIES := libext2_uuid
+LOCAL_SHARED_LIBRARIES := libext2_uuid libsparse
 LOCAL_SYSTEM_SHARED_LIBRARIES := libc
 LOCAL_MODULE_TAGS := optional
 include $(BUILD_EXECUTABLE)
+
+#----------------------------------------------------------
+include $(CLEAR_VARS)
+LOCAL_MODULE := make_f2fs_host
+
+LOCAL_SRC_FILES := \
+	mkfs/f2fs_format_main.c \
+	lib/libf2fs_io.c \
+
+LOCAL_C_INCLUDES := $(common_C_INCLUDES)
+LOCAL_CFLAGS := $(common_CFLAGS)
+LOCAL_STATIC_LIBRARIES := libf2fs_fmt_host
+LOCAL_SHARED_LIBRARIES := libext2_uuid libsparse
+include $(BUILD_HOST_EXECUTABLE)
 
 #----------------------------------------------------------
 include $(CLEAR_VARS)
@@ -107,7 +125,7 @@ LOCAL_SRC_FILES := \
 
 LOCAL_C_INCLUDES := $(common_C_INCLUDES)
 LOCAL_CFLAGS := $(target_CFLAGS)
-LOCAL_SHARED_LIBRARIES := libext2_uuid
+LOCAL_SHARED_LIBRARIES := libext2_uuid libsparse
 LOCAL_SYSTEM_SHARED_LIBRARIES := libc
 LOCAL_MODULE_TAGS := optional
 include $(BUILD_EXECUTABLE)
@@ -125,6 +143,7 @@ LOCAL_SRC_FILES := \
 
 LOCAL_C_INCLUDES := $(common_C_INCLUDES)
 LOCAL_CFLAGS := $(common_CFLAGS)
+LOCAL_SHARED_LIBRARIES := libsparse
 LOCAL_HOST_SHARED_LIBRARIES :=  libext2_uuid
 include $(BUILD_HOST_EXECUTABLE)
 
