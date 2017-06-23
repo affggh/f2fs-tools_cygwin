@@ -99,7 +99,7 @@ include $(BUILD_EXECUTABLE)
 
 #----------------------------------------------------------
 include $(CLEAR_VARS)
-LOCAL_MODULE := make_f2fs_host
+LOCAL_MODULE := make_f2fs
 
 LOCAL_SRC_FILES := \
 	mkfs/f2fs_format_main.c \
