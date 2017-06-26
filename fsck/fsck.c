@@ -347,7 +347,7 @@ err:
 static int sanity_check_nid(struct f2fs_sb_info *sbi, u32 nid,
 			struct f2fs_node *node_blk,
 			enum FILE_TYPE ftype, enum NODE_TYPE ntype,
-			struct node_info *ni, u8 *name)
+			struct node_info *ni)
 {
 	struct f2fs_fsck *fsck = F2FS_FSCK(sbi);
 	int ret;
@@ -470,7 +470,7 @@ static int fsck_chk_xattr_blk(struct f2fs_sb_info *sbi, u32 ino,
 
 	/* Sanity check */
 	if (sanity_check_nid(sbi, x_nid, node_blk,
-				F2FS_FT_XATTR, TYPE_XATTR, &ni, NULL)) {
+				F2FS_FT_XATTR, TYPE_XATTR, &ni)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -484,7 +484,7 @@ out:
 }
 
 int fsck_chk_node_blk(struct f2fs_sb_info *sbi, struct f2fs_inode *inode,
-		u32 nid, u8 *name, enum FILE_TYPE ftype, enum NODE_TYPE ntype,
+		u32 nid, enum FILE_TYPE ftype, enum NODE_TYPE ntype,
 		u32 *blk_cnt, struct child_info *child)
 {
 	struct node_info ni;
@@ -493,7 +493,7 @@ int fsck_chk_node_blk(struct f2fs_sb_info *sbi, struct f2fs_inode *inode,
 	node_blk = (struct f2fs_node *)calloc(BLOCK_SZ, 1);
 	ASSERT(node_blk != NULL);
 
-	if (sanity_check_nid(sbi, nid, node_blk, ftype, ntype, &ni, name))
+	if (sanity_check_nid(sbi, nid, node_blk, ftype, ntype, &ni))
 		goto err;
 
 	if (ntype == TYPE_INODE) {
@@ -720,7 +720,7 @@ void fsck_chk_inode_blk(struct f2fs_sb_info *sbi, u32 nid,
 					blkaddr,
 					&child, (i_blocks == *blk_cnt),
 					ftype, nid, idx, ni->version,
-					file_is_encrypt(&node_blk->i));
+					file_enc_name(&node_blk->i));
 			if (!ret) {
 				*blk_cnt = *blk_cnt + 1;
 			} else if (c.fix_on) {
@@ -748,7 +748,7 @@ void fsck_chk_inode_blk(struct f2fs_sb_info *sbi, u32 nid,
 			goto skip;
 
 		ret = fsck_chk_node_blk(sbi, &node_blk->i, i_nid,
-				NULL, ftype, ntype, blk_cnt, &child);
+					ftype, ntype, blk_cnt, &child);
 		if (!ret) {
 			*blk_cnt = *blk_cnt + 1;
 		} else if (ret == -EINVAL) {
@@ -793,7 +793,7 @@ check:
 skip_blkcnt_fix:
 	namelen = convert_encrypted_name(node_blk->i.i_name,
 					le32_to_cpu(node_blk->i.i_namelen),
-					en, file_is_encrypt(&node_blk->i));
+					en, file_enc_name(&node_blk->i));
 	en[namelen] = '\0';
 	if (ftype == F2FS_FT_ORPHAN)
 		DBG(1, "Orphan Inode: 0x%x [%s] i_blocks: %u\n\n",
@@ -878,7 +878,7 @@ int fsck_chk_dnode_blk(struct f2fs_sb_info *sbi, struct f2fs_inode *inode,
 			blkaddr, child,
 			le64_to_cpu(inode->i_blocks) == *blk_cnt, ftype,
 			nid, idx, ni->version,
-			file_is_encrypt(inode));
+			file_enc_name(inode));
 		if (!ret) {
 			*blk_cnt = *blk_cnt + 1;
 		} else if (c.fix_on) {
@@ -905,7 +905,7 @@ int fsck_chk_idnode_blk(struct f2fs_sb_info *sbi, struct f2fs_inode *inode,
 		if (le32_to_cpu(node_blk->in.nid[i]) == 0x0)
 			goto skip;
 		ret = fsck_chk_node_blk(sbi, inode,
-				le32_to_cpu(node_blk->in.nid[i]), NULL,
+				le32_to_cpu(node_blk->in.nid[i]),
 				ftype, TYPE_DIRECT_NODE, blk_cnt, child);
 		if (!ret)
 			*blk_cnt = *blk_cnt + 1;
@@ -945,7 +945,7 @@ int fsck_chk_didnode_blk(struct f2fs_sb_info *sbi, struct f2fs_inode *inode,
 		if (le32_to_cpu(node_blk->in.nid[i]) == 0x0)
 			goto skip;
 		ret = fsck_chk_node_blk(sbi, inode,
-				le32_to_cpu(node_blk->in.nid[i]), NULL,
+				le32_to_cpu(node_blk->in.nid[i]),
 				ftype, TYPE_INDIRECT_NODE, blk_cnt, child);
 		if (!ret)
 			*blk_cnt = *blk_cnt + 1;
@@ -1005,9 +1005,9 @@ static int digest_encode(const char *src, int len, char *dst)
 }
 
 int convert_encrypted_name(unsigned char *name, int len,
-				unsigned char *new, int encrypted)
+				unsigned char *new, int enc_name)
 {
-	if (!encrypted) {
+	if (!enc_name) {
 		memcpy(new, name, len);
 		new[len] = 0;
 		return len;
@@ -1019,7 +1019,7 @@ int convert_encrypted_name(unsigned char *name, int len,
 
 static void print_dentry(__u32 depth, __u8 *name,
 		u8 *bitmap, struct f2fs_dir_entry *dentry,
-		int max, int idx, int last_blk, int encrypted)
+		int max, int idx, int last_blk, int enc_name)
 {
 	int last_de = 0;
 	int next_idx = 0;
@@ -1028,7 +1028,7 @@ static void print_dentry(__u32 depth, __u8 *name,
 	int bit_offset;
 	unsigned char new[F2FS_NAME_LEN + 1];
 
-	if (c.dbg_lv != -1)
+	if (!c.show_dentry)
 		return;
 
 	name_len = le16_to_cpu(dentry[idx].name_len);
@@ -1056,16 +1056,16 @@ static void print_dentry(__u32 depth, __u8 *name,
 	for (i = 1; i < depth; i++)
 		printf("%c   ", tree_mark[i]);
 
-	convert_encrypted_name(name, name_len, new, encrypted);
+	convert_encrypted_name(name, name_len, new, enc_name);
 
 	printf("%c-- %s <ino = 0x%x>, <encrypted (%d)>\n",
 			last_de ? '`' : '|',
 			new, le32_to_cpu(dentry[idx].ino),
-			encrypted);
+			enc_name);
 }
 
 static int f2fs_check_hash_code(struct f2fs_dir_entry *dentry,
-			const unsigned char *name, u32 len, int encrypted)
+			const unsigned char *name, u32 len, int enc_name)
 {
 	f2fs_hash_t hash_code = f2fs_dentry_hash(name, len);
 
@@ -1074,7 +1074,7 @@ static int f2fs_check_hash_code(struct f2fs_dir_entry *dentry,
 		unsigned char new[F2FS_NAME_LEN + 1];
 
 		convert_encrypted_name((unsigned char *)name, len,
-							new, encrypted);
+							new, enc_name);
 		FIX_MSG("Mismatch hash_code for \"%s\" [%x:%x]",
 				new, le32_to_cpu(dentry->hash_code),
 				hash_code);
@@ -1084,33 +1084,6 @@ static int f2fs_check_hash_code(struct f2fs_dir_entry *dentry,
 	return 0;
 }
 
-static unsigned int dir_buckets(unsigned int level, int dir_level)
-{
-	if (level + dir_level < MAX_DIR_HASH_DEPTH / 2)
-		return 1 << (level + dir_level);
-	else
-		return MAX_DIR_BUCKETS;
-}
-
-static unsigned int bucket_blocks(unsigned int level)
-{
-	if (level < MAX_DIR_HASH_DEPTH / 2)
-		return 2;
-	else
-		return 4;
-}
-
-static unsigned long dir_block_index(unsigned int level,
-				int dir_level, unsigned int idx)
-{
-	unsigned long i;
-	unsigned long bidx = 0;
-
-	for (i = 0; i < level; i++)
-		bidx += dir_buckets(i, dir_level) * bucket_blocks(i);
-	bidx += idx * bucket_blocks(level);
-	return bidx;
-}
 
 static int __get_current_level(int dir_level, u32 pgofs)
 {
@@ -1156,7 +1129,7 @@ static int __chk_dots_dentries(struct f2fs_sb_info *sbi,
 			       struct child_info *child,
 			       u8 *name, int len,
 			       __u8 (*filename)[F2FS_SLOT_LEN],
-			       int encrypted)
+			       int enc_name)
 {
 	int fixed = 0;
 
@@ -1185,7 +1158,7 @@ static int __chk_dots_dentries(struct f2fs_sb_info *sbi,
 		}
 	}
 
-	if (f2fs_check_hash_code(dentry, name, len, encrypted))
+	if (f2fs_check_hash_code(dentry, name, len, enc_name))
 		fixed = 1;
 
 	if (name[len] != '\0') {
@@ -1208,7 +1181,7 @@ static void nullify_dentry(struct f2fs_dir_entry *dentry, int offs,
 static int __chk_dentries(struct f2fs_sb_info *sbi, struct child_info *child,
 			u8 *bitmap, struct f2fs_dir_entry *dentry,
 			__u8 (*filenames)[F2FS_SLOT_LEN],
-			int max, int last_blk, int encrypted)
+			int max, int last_blk, int enc_name)
 {
 	struct f2fs_fsck *fsck = F2FS_FSCK(sbi);
 	enum FILE_TYPE ftype;
@@ -1298,7 +1271,7 @@ static int __chk_dentries(struct f2fs_sb_info *sbi, struct child_info *child,
 							name_len == 2)) {
 				ret = __chk_dots_dentries(sbi, &dentry[i],
 					child, name, name_len, &filenames[i],
-					encrypted);
+					enc_name);
 				switch (ret) {
 				case 1:
 					fixed = 1;
@@ -1321,7 +1294,7 @@ static int __chk_dentries(struct f2fs_sb_info *sbi, struct child_info *child,
 			}
 		}
 
-		if (f2fs_check_hash_code(dentry + i, name, name_len, encrypted))
+		if (f2fs_check_hash_code(dentry + i, name, name_len, enc_name))
 			fixed = 1;
 
 		if (max == NR_DENTRY_IN_BLOCK) {
@@ -1340,7 +1313,7 @@ static int __chk_dentries(struct f2fs_sb_info *sbi, struct child_info *child,
 			}
 		}
 
-		en_len = convert_encrypted_name(name, name_len, en, encrypted);
+		en_len = convert_encrypted_name(name, name_len, en, enc_name);
 		en[en_len] = '\0';
 		DBG(1, "[%3u]-[0x%x] name[%s] len[0x%x] ino[0x%x] type[0x%x]\n",
 				fsck->dentry_depth, i, en, name_len,
@@ -1348,11 +1321,11 @@ static int __chk_dentries(struct f2fs_sb_info *sbi, struct child_info *child,
 				dentry[i].file_type);
 
 		print_dentry(fsck->dentry_depth, name, bitmap,
-				dentry, max, i, last_blk, encrypted);
+				dentry, max, i, last_blk, enc_name);
 
 		blk_cnt = 1;
 		ret = fsck_chk_node_blk(sbi,
-				NULL, le32_to_cpu(dentry[i].ino), name,
+				NULL, le32_to_cpu(dentry[i].ino),
 				ftype, TYPE_INODE, &blk_cnt, NULL);
 
 		if (ret && c.fix_on) {
@@ -1393,7 +1366,7 @@ int fsck_chk_inline_dentries(struct f2fs_sb_info *sbi,
 			de_blk->dentry_bitmap,
 			de_blk->dentry, de_blk->filename,
 			NR_INLINE_DENTRY, 1,
-			file_is_encrypt(&node_blk->i));
+			file_enc_name(&node_blk->i));
 	if (dentries < 0) {
 		DBG(1, "[%3d] Inline Dentry Block Fixed hash_codes\n\n",
 			fsck->dentry_depth);
@@ -1408,7 +1381,7 @@ int fsck_chk_inline_dentries(struct f2fs_sb_info *sbi,
 }
 
 int fsck_chk_dentry_blk(struct f2fs_sb_info *sbi, u32 blk_addr,
-		struct child_info *child, int last_blk, int encrypted)
+		struct child_info *child, int last_blk, int enc_name)
 {
 	struct f2fs_fsck *fsck = F2FS_FSCK(sbi);
 	struct f2fs_dentry_block *de_blk;
@@ -1424,7 +1397,7 @@ int fsck_chk_dentry_blk(struct f2fs_sb_info *sbi, u32 blk_addr,
 	dentries = __chk_dentries(sbi, child,
 			de_blk->dentry_bitmap,
 			de_blk->dentry, de_blk->filename,
-			NR_DENTRY_IN_BLOCK, last_blk, encrypted);
+			NR_DENTRY_IN_BLOCK, last_blk, enc_name);
 
 	if (dentries < 0 && !c.ro) {
 		ret = dev_write_block(de_blk, blk_addr);
@@ -1445,7 +1418,7 @@ int fsck_chk_dentry_blk(struct f2fs_sb_info *sbi, u32 blk_addr,
 int fsck_chk_data_blk(struct f2fs_sb_info *sbi, u32 blk_addr,
 		struct child_info *child, int last_blk,
 		enum FILE_TYPE ftype, u32 parent_nid, u16 idx_in_node, u8 ver,
-		int encrypted)
+		int enc_name)
 {
 	struct f2fs_fsck *fsck = F2FS_FSCK(sbi);
 
@@ -1479,7 +1452,7 @@ int fsck_chk_data_blk(struct f2fs_sb_info *sbi, u32 blk_addr,
 	if (ftype == F2FS_FT_DIR) {
 		f2fs_set_main_bitmap(sbi, blk_addr, CURSEG_HOT_DATA);
 		return fsck_chk_dentry_blk(sbi, blk_addr, child,
-						last_blk, encrypted);
+						last_blk, enc_name);
 	} else {
 		f2fs_set_main_bitmap(sbi, blk_addr, CURSEG_WARM_DATA);
 	}
@@ -1528,7 +1501,7 @@ int fsck_chk_orphan_node(struct f2fs_sb_info *sbi)
 				continue;
 			}
 
-			ret = fsck_chk_node_blk(sbi, NULL, ino, NULL,
+			ret = fsck_chk_node_blk(sbi, NULL, ino,
 					F2FS_FT_ORPHAN, TYPE_INODE, &blk_cnt,
 					NULL);
 			if (!ret)
@@ -1711,7 +1684,7 @@ static void fix_hard_links(struct f2fs_sb_info *sbi)
 	while (node) {
 		/* Sanity check */
 		if (sanity_check_nid(sbi, node->nid, node_blk,
-					F2FS_FT_MAX, TYPE_INODE, &ni, NULL))
+					F2FS_FT_MAX, TYPE_INODE, &ni))
 			FIX_MSG("Failed to fix, rerun fsck.f2fs");
 
 		node_blk->i.i_links = cpu_to_le32(node->actual_links);
@@ -1779,8 +1752,10 @@ static void fix_checkpoint(struct f2fs_sb_info *sbi)
 		flags |= CP_ORPHAN_PRESENT_FLAG;
 	}
 
-	set_cp(ckpt_flags, flags);
 	set_cp(cp_pack_total_block_count, 8 + orphan_blks + get_sb(cp_payload));
+
+	flags = update_nat_bits_flags(sb, cp, flags);
+	set_cp(ckpt_flags, flags);
 
 	set_cp(free_segment_count, get_free_segments(sbi));
 	set_cp(valid_block_count, fsck->chk.valid_blk_cnt);
@@ -1814,6 +1789,10 @@ static void fix_checkpoint(struct f2fs_sb_info *sbi)
 
 	ret = dev_write_block(cp, cp_blk_no++);
 	ASSERT(ret >= 0);
+
+	/* Write nat bits */
+	if (flags & CP_NAT_BITS_FLAG)
+		write_nat_bits(sbi, sb, cp, sbi->cur_cp);
 }
 
 int check_curseg_offset(struct f2fs_sb_info *sbi)
