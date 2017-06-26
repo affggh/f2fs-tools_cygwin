@@ -29,7 +29,7 @@ void fsck_usage()
 	MSG(0, "  -d debug level [default:0]\n");
 	MSG(0, "  -f check/fix entire partition\n");
 	MSG(0, "  -p preen mode [default:0 the same as -a [0|1]]\n");
-	MSG(0, "  -t show directory tree [-d -1]\n");
+	MSG(0, "  -t show directory tree\n");
 	exit(1);
 }
 
@@ -80,7 +80,7 @@ void sload_usage()
 
 static int is_digits(char *optarg)
 {
-	int i;
+	unsigned int i;
 
 	for (i = 0; i < strlen(optarg); i++)
 		if (!isdigit(optarg[i]))
@@ -88,18 +88,20 @@ static int is_digits(char *optarg)
 	return i == strlen(optarg);
 }
 
-static void error_out(void)
+static void error_out(char *prog)
 {
-	if (c.func == FSCK)
+	if (!strcmp("fsck.f2fs", prog))
 		fsck_usage();
-	else if (c.func == DUMP)
+	else if (!strcmp("dump.f2fs", prog))
 		dump_usage();
-	else if (c.func == DEFRAG)
+	else if (!strcmp("defrag.f2fs", prog))
 		defrag_usage();
-	else if (c.func == RESIZE)
+	else if (!strcmp("resize.f2fs", prog))
 		resize_usage();
-	else if (c.func == SLOAD)
+	else if (!strcmp("sload.f2fs", prog))
 		sload_usage();
+	else
+		MSG(0, "\nWrong progam.\n");
 }
 
 void f2fs_parse_options(int argc, char *argv[])
@@ -110,10 +112,8 @@ void f2fs_parse_options(int argc, char *argv[])
 
 	if (argc < 2) {
 		MSG(0, "\tError: Device not specified\n");
-		error_out();
+		error_out(prog);
 	}
-	c.devices[0].path = strdup(argv[argc - 1]);
-	argv[argc-- - 1] = 0;
 
 	if (!strcmp("fsck.f2fs", prog)) {
 		const char *option_string = ":ad:fp:t";
@@ -164,7 +164,7 @@ void f2fs_parse_options(int argc, char *argv[])
 				MSG(0, "Info: Force to fix corruption\n");
 				break;
 			case 't':
-				c.dbg_lv = -1;
+				c.show_dentry = 1;
 				break;
 
 
@@ -370,7 +370,14 @@ void f2fs_parse_options(int argc, char *argv[])
 				break;
 		}
 	}
-	if (argc > optind) {
+
+	if (optind >= argc) {
+		MSG(0, "\tError: Device not specified\n");
+		error_out(prog);
+	}
+
+	c.devices[0].path = strdup(argv[optind]);
+	if (argc > (optind + 1)) {
 		c.dbg_lv = 0;
 		err = EUNKNOWN_ARG;
 	}
@@ -392,7 +399,7 @@ void f2fs_parse_options(int argc, char *argv[])
 		MSG(0, "\tError: Unknown argument %s\n", argv[optind]);
 		break;
 	}
-	error_out();
+	error_out(prog);
 }
 
 static void do_fsck(struct f2fs_sb_info *sbi)
@@ -440,7 +447,7 @@ static void do_fsck(struct f2fs_sb_info *sbi)
 
 	/* Traverse all block recursively from root inode */
 	blk_cnt = 1;
-	fsck_chk_node_blk(sbi, NULL, sbi->root_ino_num, (u8 *)"/",
+	fsck_chk_node_blk(sbi, NULL, sbi->root_ino_num,
 			F2FS_FT_DIR, TYPE_INODE, &blk_cnt, NULL);
 	fsck_verify(sbi);
 	fsck_free(sbi);
@@ -535,8 +542,9 @@ static int do_resize(struct f2fs_sb_info *sbi)
 		return -1;
 	}
 
-	if (c.target_sectors <=
-			(get_sb(block_count) << get_sb(log_sectors_per_block))) {
+	/* may different sector size */
+	if ((c.target_sectors * c.sector_size >>
+			get_sb(log_blocksize)) <= get_sb(block_count)) {
 		ASSERT_MSG("Nothing to resize, now only support resize to expand\n");
 		return -1;
 	}
@@ -566,6 +574,8 @@ int main(int argc, char **argv)
 	f2fs_parse_options(argc, argv);
 
 	if (f2fs_devs_are_umounted() < 0) {
+		if (errno == EBUSY)
+			return -1;
 		if (!c.ro || c.func == DEFRAG) {
 			MSG(0, "\tError: Not available on mounted device!\n");
 			return -1;
