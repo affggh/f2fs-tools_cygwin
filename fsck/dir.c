@@ -34,20 +34,27 @@ next:
 
 }
 
-static void make_dentry_ptr(struct f2fs_dentry_ptr *d, void *src, int type)
+void make_dentry_ptr(struct f2fs_dentry_ptr *d, struct f2fs_node *node_blk,
+							void *src, int type)
 {
 	if (type == 1) {
 		struct f2fs_dentry_block *t = (struct f2fs_dentry_block *)src;
 		d->max = NR_DENTRY_IN_BLOCK;
+		d->nr_bitmap = SIZE_OF_DENTRY_BITMAP;
 		d->bitmap = t->dentry_bitmap;
 		d->dentry = t->dentry;
 		d->filename = t->filename;
 	} else {
-		struct f2fs_inline_dentry *t = (struct f2fs_inline_dentry *)src;
-		d->max = NR_INLINE_DENTRY;
-		d->bitmap = t->dentry_bitmap;
-		d->dentry = t->dentry;
-		d->filename = t->filename;
+		int entry_cnt = NR_INLINE_DENTRY(node_blk);
+		int bitmap_size = INLINE_DENTRY_BITMAP_SIZE(node_blk);
+		int reserved_size = INLINE_RESERVED_SIZE(node_blk);
+
+		d->max = entry_cnt;
+		d->nr_bitmap = bitmap_size;
+		d->bitmap = src;
+		d->dentry = src + bitmap_size + reserved_size;
+		d->filename = src + bitmap_size + reserved_size +
+						SIZE_OF_DIR_ENTRY * entry_cnt;
 	}
 }
 
@@ -93,7 +100,7 @@ static struct f2fs_dir_entry *find_in_block(void *block,
 {
 	struct f2fs_dentry_ptr d;
 
-	make_dentry_ptr(&d, block, 1);
+	make_dentry_ptr(&d, NULL, block, 1);
 	return find_target_dentry(name, len, namehash, max_slots, &d);
 }
 
@@ -256,7 +263,7 @@ start:
 	goto start;
 
 add_dentry:
-	make_dentry_ptr(&d, (void *)dentry_blk, 1);
+	make_dentry_ptr(&d, NULL, (void *)dentry_blk, 1);
 	f2fs_update_dentry(ino, file_type, &d, name, name_len, dentry_hash, bit_pos);
 
 	ret = dev_write_block(dentry_blk, dn.data_blkaddr);
@@ -336,7 +343,7 @@ static void make_empty_dir(struct f2fs_sb_info *sbi, struct f2fs_node *inode)
 	ret = dev_write_block(dent_blk, blkaddr);
 	ASSERT(ret >= 0);
 
-	inode->i.i_addr[0] = cpu_to_le32(blkaddr);
+	inode->i.i_addr[get_extra_isize(inode)] = cpu_to_le32(blkaddr);
 	free(dent_blk);
 }
 
@@ -353,10 +360,10 @@ static void page_symlink(struct f2fs_sb_info *sbi, struct f2fs_node *inode,
 	get_node_info(sbi, ino, &ni);
 
 	/* store into inline_data */
-	if (symlen + 1 <= MAX_INLINE_DATA) {
+	if (symlen + 1 <= MAX_INLINE_DATA(inode)) {
 		inode->i.i_inline |= F2FS_INLINE_DATA;
 		inode->i.i_inline |= F2FS_DATA_EXIST;
-		memcpy(&inode->i.i_addr[1], symname, symlen);
+		memcpy(inline_data_addr(inode), symname, symlen);
 		return;
 	}
 
@@ -371,7 +378,7 @@ static void page_symlink(struct f2fs_sb_info *sbi, struct f2fs_node *inode,
 	ret = dev_write_block(data_blk, blkaddr);
 	ASSERT(ret >= 0);
 
-	inode->i.i_addr[0] = cpu_to_le32(blkaddr);
+	inode->i.i_addr[get_extra_isize(inode)] = cpu_to_le32(blkaddr);
 	free(data_blk);
 }
 
@@ -396,7 +403,7 @@ static void init_inode_block(struct f2fs_sb_info *sbi,
 		ASSERT(de->link);
 		mode |= S_IFLNK;
 		size = strlen(de->link);
-		if (size + 1 > MAX_INLINE_DATA)
+		if (size + 1 > MAX_INLINE_DATA(node_blk))
 			blocks++;
 	} else {
 		ASSERT(0);
@@ -425,6 +432,12 @@ static void init_inode_block(struct f2fs_sb_info *sbi,
 	memcpy(node_blk->i.i_name, de->name, de->len);
 	node_blk->i.i_name[de->len] = 0;
 
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_EXTRA_ATTR)) {
+		node_blk->i.i_inline |= F2FS_EXTRA_ATTR;
+		node_blk->i.i_extra_isize =
+				cpu_to_le16(F2FS_TOTAL_EXTRA_ATTR_SIZE);
+	}
+
 	node_blk->footer.ino = cpu_to_le32(de->ino);
 	node_blk->footer.nid = cpu_to_le32(de->ino);
 	node_blk->footer.flag = 0;
@@ -434,6 +447,10 @@ static void init_inode_block(struct f2fs_sb_info *sbi,
 		make_empty_dir(sbi, node_blk);
 	else if (S_ISLNK(mode))
 		page_symlink(sbi, node_blk, de->link, size);
+
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_INODE_CHKSUM))
+		node_blk->i.i_inode_checksum =
+			cpu_to_le32(f2fs_inode_chksum(node_blk));
 }
 
 int convert_inline_dentry(struct f2fs_sb_info *sbi, struct f2fs_node *node,
@@ -442,7 +459,7 @@ int convert_inline_dentry(struct f2fs_sb_info *sbi, struct f2fs_node *node,
 	struct f2fs_inode *inode = &(node->i);
 	unsigned int dir_level = node->i.i_dir_level;
 	nid_t ino = le32_to_cpu(node->footer.ino);
-	char inline_data[MAX_INLINE_DATA];
+	char inline_data[MAX_INLINE_DATA(node)];
 	struct dnode_of_data dn = {0};
 	struct f2fs_dentry_ptr d;
 	unsigned long bit_pos = 0;
@@ -451,16 +468,16 @@ int convert_inline_dentry(struct f2fs_sb_info *sbi, struct f2fs_node *node,
 	if (!(inode->i_inline & F2FS_INLINE_DENTRY))
 		return 0;
 
-	memcpy(inline_data, inline_data_addr(node), MAX_INLINE_DATA);
-	memset(inline_data_addr(node), 0, MAX_INLINE_DATA);
+	memcpy(inline_data, inline_data_addr(node), MAX_INLINE_DATA(node));
+	memset(inline_data_addr(node), 0, MAX_INLINE_DATA(node));
 	inode->i_inline &= ~F2FS_INLINE_DENTRY;
 
 	ret = dev_write_block(node, p_blkaddr);
 	ASSERT(ret >= 0);
 
 	if (!dir_level) {
-		struct f2fs_inline_dentry *inline_dentry;
 		struct f2fs_dentry_block *dentry_blk;
+		struct f2fs_dentry_ptr src, dst;
 
 		dentry_blk = calloc(BLOCK_SZ, 1);
 		ASSERT(dentry_blk);
@@ -470,17 +487,16 @@ int convert_inline_dentry(struct f2fs_sb_info *sbi, struct f2fs_node *node,
 		if (dn.data_blkaddr == NULL_ADDR)
 			new_data_block(sbi, dentry_blk, &dn, CURSEG_HOT_DATA);
 
-		inline_dentry = (struct f2fs_inline_dentry *)inline_data;
-		 /* copy data from inline dentry block to new dentry block */
-		memcpy(dentry_blk->dentry_bitmap, inline_dentry->dentry_bitmap,
-				INLINE_DENTRY_BITMAP_SIZE);
-		memset(dentry_blk->dentry_bitmap + INLINE_DENTRY_BITMAP_SIZE, 0,
-			SIZE_OF_DENTRY_BITMAP - INLINE_DENTRY_BITMAP_SIZE);
+		make_dentry_ptr(&src, node, (void *)inline_data, 2);
+		make_dentry_ptr(&dst, NULL, (void *)dentry_blk, 1);
 
-		memcpy(dentry_blk->dentry, inline_dentry->dentry,
-			sizeof(struct f2fs_dir_entry) * NR_INLINE_DENTRY);
-		memcpy(dentry_blk->filename, inline_dentry->filename,
-				NR_INLINE_DENTRY * F2FS_SLOT_LEN);
+		 /* copy data from inline dentry block to new dentry block */
+		memcpy(dst.bitmap, src.bitmap, src.nr_bitmap);
+		memset(dst.bitmap + src.nr_bitmap, 0,
+					dst.nr_bitmap - src.nr_bitmap);
+
+		memcpy(dst.dentry, src.dentry, SIZE_OF_DIR_ENTRY * src.max);
+		memcpy(dst.filename, src.filename, src.max * F2FS_SLOT_LEN);
 
 		ret = dev_write_block(dentry_blk, dn.data_blkaddr);
 		ASSERT(ret >= 0);
@@ -492,7 +508,7 @@ int convert_inline_dentry(struct f2fs_sb_info *sbi, struct f2fs_node *node,
 	}
 
 	make_empty_dir(sbi, node);
-	make_dentry_ptr(&d, (void *)inline_data, 2);
+	make_dentry_ptr(&d, node, (void *)inline_data, 2);
 
 	while (bit_pos < d.max) {
 		struct f2fs_dir_entry *de;

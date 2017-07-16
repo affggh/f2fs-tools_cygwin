@@ -120,14 +120,18 @@ next:
 static void verify_cur_segs(void)
 {
 	int i, j;
+	int reorder = 0;
 
 	for (i = 0; i < NR_CURSEG_TYPE; i++) {
-		for (j = 0; j < NR_CURSEG_TYPE; j++)
-			if (c.cur_seg[i] == c.cur_seg[j])
+		for (j = i + 1; j < NR_CURSEG_TYPE; j++) {
+			if (c.cur_seg[i] == c.cur_seg[j]) {
+				reorder = 1;
 				break;
+			}
+		}
 	}
 
-	if (i == NR_CURSEG_TYPE && j == NR_CURSEG_TYPE)
+	if (!reorder)
 		return;
 
 	c.cur_seg[0] = 0;
@@ -369,6 +373,10 @@ static int f2fs_prepare_super_block(void)
 
 	uuid_generate(sb->uuid);
 
+	/* precompute checksum seed for metadata */
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_INODE_CHKSUM))
+		c.chksum_seed = f2fs_cal_crc32(~0, sb->uuid, sizeof(sb->uuid));
+
 	utf8_to_utf16(sb->volume_name, (const char *)c.vol_label,
 				MAX_VOLUME_NAME, strlen(c.vol_label));
 	set_sb(node_ino, 1);
@@ -542,7 +550,7 @@ static int f2fs_write_check_point_pack(void)
 	}
 
 	/* 1. cp page 1 of checkpoint pack 1 */
-	cp->checkpoint_ver = rand() | 0x1;
+	cp->checkpoint_ver = cpu_to_le64(rand() | 0x1);
 	set_cp(cur_node_segno[0], c.cur_seg[CURSEG_HOT_NODE]);
 	set_cp(cur_node_segno[1], c.cur_seg[CURSEG_WARM_NODE]);
 	set_cp(cur_node_segno[2], c.cur_seg[CURSEG_COLD_NODE]);
@@ -923,13 +931,26 @@ static int f2fs_write_root_inode(void)
 	raw_node->i.i_current_depth = cpu_to_le32(1);
 	raw_node->i.i_dir_level = DEF_DIR_LEVEL;
 
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_EXTRA_ATTR)) {
+		raw_node->i.i_inline = F2FS_EXTRA_ATTR;
+		raw_node->i.i_extra_isize =
+				cpu_to_le16(F2FS_TOTAL_EXTRA_ATTR_SIZE);
+	}
+
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_PRJQUOTA))
+		raw_node->i.i_projid = cpu_to_le32(F2FS_DEF_PROJID);
+
 	data_blk_nor = get_sb(main_blkaddr) +
 		c.cur_seg[CURSEG_HOT_DATA] * c.blks_per_seg;
-	raw_node->i.i_addr[0] = cpu_to_le32(data_blk_nor);
+	raw_node->i.i_addr[get_extra_isize(raw_node)] = cpu_to_le32(data_blk_nor);
 
 	raw_node->i.i_ext.fofs = 0;
 	raw_node->i.i_ext.blk_addr = 0;
 	raw_node->i.i_ext.len = 0;
+
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_INODE_CHKSUM))
+		raw_node->i.i_inode_checksum =
+			cpu_to_le32(f2fs_inode_chksum(raw_node));
 
 	main_area_node_seg_blk_offset = get_sb(main_blkaddr);
 	main_area_node_seg_blk_offset += c.cur_seg[CURSEG_HOT_NODE] *
