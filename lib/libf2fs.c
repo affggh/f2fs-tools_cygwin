@@ -457,8 +457,8 @@ f2fs_hash_t f2fs_dentry_hash(const unsigned char *name, int len)
 unsigned int addrs_per_inode(struct f2fs_inode *i)
 {
 	if (i->i_inline & F2FS_INLINE_XATTR)
-		return DEF_ADDRS_PER_INODE - F2FS_INLINE_XATTR_ADDRS;
-	return DEF_ADDRS_PER_INODE;
+		return CUR_ADDRS_PER_INODE(i) - F2FS_INLINE_XATTR_ADDRS;
+	return CUR_ADDRS_PER_INODE(i);
 }
 
 /*
@@ -491,6 +491,28 @@ int f2fs_crc_valid(u_int32_t blk_crc, void *buf, int len)
 		return -1;
 	}
 	return 0;
+}
+
+__u32 f2fs_inode_chksum(struct f2fs_node *node)
+{
+	struct f2fs_inode *ri = &node->i;
+	__le32 ino = node->footer.ino;
+	__le32 gen = ri->i_generation;
+	__u32 chksum, chksum_seed;
+	__u32 dummy_cs = 0;
+	unsigned int offset = offsetof(struct f2fs_inode, i_inode_checksum);
+	unsigned int cs_size = sizeof(dummy_cs);
+
+	chksum = f2fs_cal_crc32(c.chksum_seed, (__u8 *)&ino,
+							sizeof(ino));
+	chksum_seed = f2fs_cal_crc32(chksum, (__u8 *)&gen, sizeof(gen));
+
+	chksum = f2fs_cal_crc32(chksum_seed, (__u8 *)ri, offset);
+	chksum = f2fs_cal_crc32(chksum, (__u8 *)&dummy_cs, cs_size);
+	offset += cs_size;
+	chksum = f2fs_cal_crc32(chksum, (__u8 *)ri + offset,
+						F2FS_BLKSIZE - offset);
+	return chksum;
 }
 
 /*
