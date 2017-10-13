@@ -5,7 +5,15 @@ ifeq ($(HOST_OS),linux)
 
 # The versions depend on $(LOCAL_PATH)/VERSION
 version_CFLAGS := -DF2FS_MAJOR_VERSION=1 -DF2FS_MINOR_VERSION=8 -DF2FS_TOOLS_VERSION=\"1.8.0\" -DF2FS_TOOLS_DATE=\"2017-02-03\"
-common_CFLAGS := -DWITH_ANDROID $(version_CFLAGS)
+common_CFLAGS := -DWITH_ANDROID $(version_CFLAGS) \
+    -Wall -Werror \
+    -Wno-format \
+    -Wno-macro-redefined \
+    -Wno-missing-field-initializers \
+    -Wno-pointer-arith \
+    -Wno-sign-compare \
+    -Wno-unused-function \
+
 # Workaround for the <sys/types.h>/<sys/sysmacros.h> split, here now for
 # bionic and coming later for glibc.
 target_CFLAGS := $(common_CFLAGS) -include sys/sysmacros.h
