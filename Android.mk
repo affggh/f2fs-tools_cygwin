@@ -134,6 +134,7 @@ LOCAL_SRC_FILES := \
 	fsck/quotaio_v2.c \
 	fsck/node.c \
 	fsck/segment.c \
+	fsck/xattr.c \
 	fsck/main.c \
 	fsck/mount.c \
 	lib/libf2fs.c \
@@ -160,6 +161,7 @@ LOCAL_SRC_FILES := \
 	fsck/quotaio_v2.c \
 	fsck/node.c \
 	fsck/segment.c \
+	fsck/xattr.c \
 	fsck/main.c \
 	fsck/mount.c \
 	lib/libf2fs.c \
