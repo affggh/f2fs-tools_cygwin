@@ -129,6 +129,7 @@ struct f2fs_dentry_ptr {
 	struct f2fs_dir_entry *dentry;
 	__u8 (*filename)[F2FS_SLOT_LEN];
 	int max;
+	int nr_bitmap;
 };
 
 struct dentry {
@@ -232,7 +233,9 @@ static inline struct sit_info *SIT_I(struct f2fs_sb_info *sbi)
 
 static inline void *inline_data_addr(struct f2fs_node *node_blk)
 {
-	return (void *)&(node_blk->i.i_addr[1]);
+	int ofs = get_extra_isize(node_blk) + DEF_INLINE_RESERVED_SIZE;
+
+	return (void *)&(node_blk->i.i_addr[ofs]);
 }
 
 static inline unsigned int ofs_of_node(struct f2fs_node *node_blk)
@@ -273,7 +276,7 @@ static inline void *__bitmap_ptr(struct f2fs_sb_info *sbi, int flag)
 static inline bool is_set_ckpt_flags(struct f2fs_checkpoint *cp, unsigned int f)
 {
 	unsigned int ckpt_flags = le32_to_cpu(cp->ckpt_flags);
-	return ckpt_flags & f;
+	return ckpt_flags & f ? 1 : 0;
 }
 
 static inline block_t __start_cp_addr(struct f2fs_sb_info *sbi)
