@@ -126,6 +126,9 @@ LOCAL_MODULE := fsck.f2fs
 LOCAL_SRC_FILES := \
 	fsck/dump.c \
 	fsck/fsck.c \
+	fsck/dir.c \
+	fsck/node.c \
+	fsck/segment.c \
 	fsck/main.c \
 	fsck/mount.c \
 	lib/libf2fs.c \
@@ -144,6 +147,9 @@ LOCAL_MODULE := fsck.f2fs
 LOCAL_SRC_FILES := \
 	fsck/dump.c \
 	fsck/fsck.c \
+	fsck/dir.c \
+	fsck/node.c \
+	fsck/segment.c \
 	fsck/main.c \
 	fsck/mount.c \
 	lib/libf2fs.c \
