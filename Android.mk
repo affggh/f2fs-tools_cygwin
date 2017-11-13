@@ -127,6 +127,11 @@ LOCAL_SRC_FILES := \
 	fsck/dump.c \
 	fsck/fsck.c \
 	fsck/dir.c \
+	fsck/dict.c \
+	fsck/mkquota.c \
+	fsck/quotaio.c \
+	fsck/quotaio_tree.c \
+	fsck/quotaio_v2.c \
 	fsck/node.c \
 	fsck/segment.c \
 	fsck/main.c \
@@ -148,6 +153,11 @@ LOCAL_SRC_FILES := \
 	fsck/dump.c \
 	fsck/fsck.c \
 	fsck/dir.c \
+	fsck/dict.c \
+	fsck/mkquota.c \
+	fsck/quotaio.c \
+	fsck/quotaio_tree.c \
+	fsck/quotaio_v2.c \
 	fsck/node.c \
 	fsck/segment.c \
 	fsck/main.c \
