@@ -9,7 +9,14 @@
  * published by the Free Software Foundation.
  */
 #include "fsck.h"
+#include "xattr.h"
 #include <locale.h>
+#ifdef HAVE_LINUX_POSIX_ACL_H
+#include <linux/posix_acl.h>
+#endif
+#ifdef HAVE_SYS_ACL_H
+#include <sys/acl.h>
+#endif
 
 u32 get_free_segments(struct f2fs_sb_info *sbi)
 {
@@ -35,8 +42,125 @@ void update_free_segments(struct f2fs_sb_info *sbi)
 	i++;
 }
 
-void print_inode_info(struct f2fs_inode *inode, int name)
+#if defined(HAVE_LINUX_POSIX_ACL_H) || defined(HAVE_SYS_ACL_H)
+void print_acl(char *value, int size)
 {
+	struct f2fs_acl_header *hdr = (struct f2fs_acl_header *)value;
+	struct f2fs_acl_entry *entry = (struct f2fs_acl_entry *)(hdr + 1);
+	const char *end = value + size;
+	int i, count;
+
+	if (hdr->a_version != cpu_to_le32(F2FS_ACL_VERSION)) {
+		MSG(0, "Invalid ACL version [0x%x : 0x%x]\n",
+				le32_to_cpu(hdr->a_version), F2FS_ACL_VERSION);
+		return;
+	}
+
+	count = f2fs_acl_count(size);
+	if (count <= 0) {
+		MSG(0, "Invalid ACL value size %d\n", size);
+		return;
+	}
+
+	for (i = 0; i < count; i++) {
+		if ((char *)entry > end) {
+			MSG(0, "Invalid ACL entries count %d\n", count);
+			return;
+		}
+
+		switch (le16_to_cpu(entry->e_tag)) {
+		case ACL_USER_OBJ:
+		case ACL_GROUP_OBJ:
+		case ACL_MASK:
+		case ACL_OTHER:
+			MSG(0, "tag:0x%x perm:0x%x\n",
+					le16_to_cpu(entry->e_tag),
+					le16_to_cpu(entry->e_perm));
+			entry = (struct f2fs_acl_entry *)((char *)entry +
+					sizeof(struct f2fs_acl_entry_short));
+			break;
+		case ACL_USER:
+			MSG(0, "tag:0x%x perm:0x%x uid:%u\n",
+					le16_to_cpu(entry->e_tag),
+					le16_to_cpu(entry->e_perm),
+					le32_to_cpu(entry->e_id));
+			entry = (struct f2fs_acl_entry *)((char *)entry +
+					sizeof(struct f2fs_acl_entry));
+			break;
+		case ACL_GROUP:
+			MSG(0, "tag:0x%x perm:0x%x gid:%u\n",
+					le16_to_cpu(entry->e_tag),
+					le16_to_cpu(entry->e_perm),
+					le32_to_cpu(entry->e_id));
+			entry = (struct f2fs_acl_entry *)((char *)entry +
+					sizeof(struct f2fs_acl_entry));
+			break;
+		default:
+			MSG(0, "Unknown ACL tag 0x%x\n",
+					le16_to_cpu(entry->e_tag));
+			return;
+		}
+	}
+}
+#else
+#define print_acl(value, size) do {		\
+	int i;					\
+	for (i = 0; i < size; i++)		\
+		MSG(0, "%02X", value[i]);	\
+	MSG(0, "\n");				\
+} while (0)
+#endif
+
+void print_xattr_entry(struct f2fs_xattr_entry *ent)
+{
+	char *value = (char *)(ent->e_name + le16_to_cpu(ent->e_name_len));
+	struct fscrypt_context *ctx;
+	int i;
+
+	MSG(0, "\nxattr: e_name_index:%d e_name:", ent->e_name_index);
+	for (i = 0; i < le16_to_cpu(ent->e_name_len); i++)
+		MSG(0, "%c", ent->e_name[i]);
+	MSG(0, " e_name_len:%d e_value_size:%d e_value:\n",
+			ent->e_name_len, le16_to_cpu(ent->e_value_size));
+
+	switch (ent->e_name_index) {
+	case F2FS_XATTR_INDEX_POSIX_ACL_ACCESS:
+	case F2FS_XATTR_INDEX_POSIX_ACL_DEFAULT:
+		print_acl(value, le16_to_cpu(ent->e_value_size));
+		break;
+	case F2FS_XATTR_INDEX_USER:
+	case F2FS_XATTR_INDEX_SECURITY:
+	case F2FS_XATTR_INDEX_TRUSTED:
+	case F2FS_XATTR_INDEX_LUSTRE:
+		for (i = 0; i < le16_to_cpu(ent->e_value_size); i++)
+			MSG(0, "%02X", value[i]);
+		MSG(0, "\n");
+		break;
+	case F2FS_XATTR_INDEX_ENCRYPTION:
+		ctx = (struct fscrypt_context *)value;
+		MSG(0, "format: %d\n", ctx->format);
+		MSG(0, "contents_encryption_mode: 0x%x\n", ctx->contents_encryption_mode);
+		MSG(0, "filenames_encryption_mode: 0x%x\n", ctx->filenames_encryption_mode);
+		MSG(0, "flags: 0x%x\n", ctx->flags);
+		MSG(0, "master_key_descriptor: ");
+		for (i = 0; i < FS_KEY_DESCRIPTOR_SIZE; i++)
+			MSG(0, "%02X", ctx->master_key_descriptor[i]);
+		MSG(0, "\nnonce: ");
+		for (i = 0; i < FS_KEY_DERIVATION_NONCE_SIZE; i++)
+			MSG(0, "%02X", ctx->nonce[i]);
+		MSG(0, "\n");
+		break;
+	default:
+		break;
+	}
+}
+
+void print_inode_info(struct f2fs_sb_info *sbi,
+			struct f2fs_node *node, int name)
+{
+	struct f2fs_inode *inode = &node->i;
+	void *xattr_addr;
+	struct f2fs_xattr_entry *ent;
 	unsigned char en[F2FS_NAME_LEN + 1];
 	unsigned int i = 0;
 	int namelen = le32_to_cpu(inode->i_namelen);
@@ -89,7 +213,7 @@ void print_inode_info(struct f2fs_inode *inode, int name)
 			le32_to_cpu(inode->i_ext.len));
 
 	DISP_u16(inode, i_extra_isize);
-	DISP_u16(inode, i_padding);
+	DISP_u16(inode, i_inline_xattr_size);
 	DISP_u32(inode, i_projid);
 	DISP_u32(inode, i_inode_checksum);
 
@@ -111,17 +235,24 @@ void print_inode_info(struct f2fs_inode *inode, int name)
 	DISP_u32(inode, i_nid[3]);	/* indirect */
 	DISP_u32(inode, i_nid[4]);	/* double indirect */
 
+	xattr_addr = read_all_xattrs(sbi, node);
+	list_for_each_xattr(ent, xattr_addr) {
+		print_xattr_entry(ent);
+	}
+	free(xattr_addr);
+
 	printf("\n");
 }
 
-void print_node_info(struct f2fs_node *node_block, int verbose)
+void print_node_info(struct f2fs_sb_info *sbi,
+			struct f2fs_node *node_block, int verbose)
 {
 	nid_t ino = le32_to_cpu(node_block->footer.ino);
 	nid_t nid = le32_to_cpu(node_block->footer.nid);
 	/* Is this inode? */
 	if (ino == nid) {
 		DBG(verbose, "Node ID [0x%x:%u] is inode\n", nid, nid);
-		print_inode_info(&node_block->i, verbose);
+		print_inode_info(sbi, node_block, verbose);
 	} else {
 		int i;
 		u32 *dump_blk = (u32 *)node_block;
@@ -293,6 +424,12 @@ void print_sb_state(struct f2fs_super_block *sb)
 	}
 	if (f & cpu_to_le32(F2FS_FEATURE_INODE_CHKSUM)) {
 		MSG(0, "%s", " inode checksum");
+	}
+	if (f & cpu_to_le32(F2FS_FEATURE_FLEXIBLE_INLINE_XATTR)) {
+		MSG(0, "%s", " flexible inline xattr");
+	}
+	if (f & cpu_to_le32(F2FS_FEATURE_QUOTA_INO)) {
+		MSG(0, "%s", " quota ino");
 	}
 	MSG(0, "\n");
 	MSG(0, "Info: superblock encrypt level = %d, salt = ",
@@ -736,7 +873,7 @@ static int f2fs_init_nid_bitmap(struct f2fs_sb_info *sbi)
 	nid_t nid;
 	int i;
 
-	if (!(c.func == SLOAD))
+	if (!(c.func == SLOAD || c.func == FSCK))
 		return 0;
 
 	nm_i->nid_bitmap = (char *)calloc(nid_bitmap_size, 1);
@@ -1861,7 +1998,7 @@ void nullify_nat_entry(struct f2fs_sb_info *sbi, u32 nid)
 		if (le32_to_cpu(nid_in_journal(journal, i)) == nid) {
 			memset(&nat_in_journal(journal, i), 0,
 					sizeof(struct f2fs_nat_entry));
-			FIX_MSG("Remove nid [0x%x] in nat journal\n", nid);
+			FIX_MSG("Remove nid [0x%x] in nat journal", nid);
 			return;
 		}
 	}
@@ -1874,8 +2011,15 @@ void nullify_nat_entry(struct f2fs_sb_info *sbi, u32 nid)
 	ret = dev_read_block(nat_block, block_addr);
 	ASSERT(ret >= 0);
 
-	memset(&nat_block->entries[entry_off], 0,
+	if (nid == F2FS_NODE_INO(sbi) || nid == F2FS_META_INO(sbi)) {
+		FIX_MSG("nid [0x%x] block_addr= 0x%x -> 0x1", nid,
+			le32_to_cpu(nat_block->entries[entry_off].block_addr));
+		nat_block->entries[entry_off].block_addr = cpu_to_le32(0x1);
+	} else {
+		memset(&nat_block->entries[entry_off], 0,
 					sizeof(struct f2fs_nat_entry));
+		FIX_MSG("Remove nid [0x%x] in NAT", nid);
+	}
 
 	ret = dev_write_block(nat_block, block_addr);
 	ASSERT(ret >= 0);
@@ -1939,7 +2083,7 @@ void write_checkpoint(struct f2fs_sb_info *sbi)
 		write_nat_bits(sbi, sb, cp, sbi->cur_cp);
 
 	/* in case of sudden power off */
-	f2fs_finalize_device();
+	f2fs_fsync_device();
 
 	/* write the last cp */
 	ret = dev_write_block(cp, cp_blk_no++);
@@ -1997,13 +2141,14 @@ void build_nat_area_bitmap(struct f2fs_sb_info *sbi)
 
 			if ((nid + i) == F2FS_NODE_INO(sbi) ||
 					(nid + i) == F2FS_META_INO(sbi)) {
-				/* block_addr of node/meta inode should be 0x1 */
+				/*
+				 * block_addr of node/meta inode should be 0x1.
+				 * Set this bit, and fsck_verify will fix it.
+				 */
 				if (le32_to_cpu(nat_block->entries[i].block_addr) != 0x1) {
-					FIX_MSG("ino: 0x%x node/meta inode, block_addr= 0x%x -> 0x1",
+					ASSERT_MSG("\tError: ino[0x%x] block_addr[0x%x] is invalid\n",
 							nid + i, le32_to_cpu(nat_block->entries[i].block_addr));
-					nat_block->entries[i].block_addr = cpu_to_le32(0x1);
-					ret = dev_write_block(nat_block, block_addr);
-					ASSERT(ret >= 0);
+					f2fs_set_bit(nid + i, fsck->nat_area_bitmap);
 				}
 				continue;
 			}
@@ -2028,7 +2173,6 @@ void build_nat_area_bitmap(struct f2fs_sb_info *sbi)
 				 */
 				ASSERT_MSG("Invalid nat entry[0]: "
 					"blk_addr[0x%x]\n", ni.blk_addr);
-				c.fix_on = 1;
 				fsck->chk.valid_nat_entry_cnt--;
 			}
 
@@ -2156,10 +2300,14 @@ int f2fs_do_mount(struct f2fs_sb_info *sbi)
 	if (c.auto_fix || c.preen_mode) {
 		u32 flag = get_cp(ckpt_flags);
 
-		if (flag & CP_FSCK_FLAG)
+		if (flag & CP_FSCK_FLAG ||
+			(exist_qf_ino(sb) && (!(flag & CP_UMOUNT_FLAG) ||
+						flag & CP_ERROR_FLAG))) {
 			c.fix_on = 1;
-		else if (!c.preen_mode)
+		} else if (!c.preen_mode) {
+			print_cp_state(flag);
 			return 1;
+		}
 	}
 
 	c.bug_on = 0;
@@ -2221,7 +2369,7 @@ void f2fs_do_umount(struct f2fs_sb_info *sbi)
 	unsigned int i;
 
 	/* free nm_info */
-	if (c.func == SLOAD)
+	if (c.func == SLOAD || c.func == FSCK)
 		free(nm_i->nid_bitmap);
 	free(nm_i->nat_bitmap);
 	free(sbi->nm_info);

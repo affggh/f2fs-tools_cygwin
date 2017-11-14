@@ -456,9 +456,7 @@ f2fs_hash_t f2fs_dentry_hash(const unsigned char *name, int len)
 
 unsigned int addrs_per_inode(struct f2fs_inode *i)
 {
-	if (i->i_inline & F2FS_INLINE_XATTR)
-		return CUR_ADDRS_PER_INODE(i) - F2FS_INLINE_XATTR_ADDRS;
-	return CUR_ADDRS_PER_INODE(i);
+	return CUR_ADDRS_PER_INODE(i) - get_inline_xattr_addrs(i);
 }
 
 /*
@@ -579,6 +577,11 @@ void f2fs_init_configuration(void)
 	c.zoned_mode = 0;
 	c.zoned_model = 0;
 	c.zone_blocks = 0;
+#ifdef WITH_ANDROID
+	c.preserve_limits = 0;
+#else
+	c.preserve_limits = 1;
+#endif
 
 	for (i = 0; i < MAX_DEVICES; i++) {
 		memset(&c.devices[i], 0, sizeof(struct device_info));
@@ -600,6 +603,7 @@ void f2fs_init_configuration(void)
 	c.trimmed = 0;
 	c.ro = 0;
 	c.kd = -1;
+	c.dry_run = 0;
 }
 
 static int is_mounted(const char *mpt, const char *device)

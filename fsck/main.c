@@ -18,6 +18,8 @@
 #include "fsck.h"
 #include <libgen.h>
 #include <ctype.h>
+#include <getopt.h>
+#include "quotaio.h"
 
 struct f2fs_fsck gfsck;
 
@@ -30,6 +32,8 @@ void fsck_usage()
 	MSG(0, "  -f check/fix entire partition\n");
 	MSG(0, "  -p preen mode [default:0 the same as -a [0|1]]\n");
 	MSG(0, "  -t show directory tree\n");
+	MSG(0, "  -q preserve quota limits\n");
+	MSG(0, "  --dry-run do not really fix corruptions\n");
 	exit(1);
 }
 
@@ -116,11 +120,21 @@ void f2fs_parse_options(int argc, char *argv[])
 	}
 
 	if (!strcmp("fsck.f2fs", prog)) {
-		const char *option_string = ":ad:fp:t";
+		const char *option_string = ":ad:fp:q:t";
+		int opt = 0;
+		struct option long_opt[] = {
+			{"dry-run", no_argument, 0, 1},
+			{0, 0, 0, 0}
+		};
 
 		c.func = FSCK;
-		while ((option = getopt(argc, argv, option_string)) != EOF) {
+		while ((option = getopt_long(argc, argv, option_string,
+						long_opt, &opt)) != EOF) {
 			switch (option) {
+			case 1:
+				c.dry_run = 1;
+				MSG(0, "Info: Dry run\n");
+				break;
 			case 'a':
 				c.auto_fix = 1;
 				MSG(0, "Info: Fix the reported corruption.\n");
@@ -163,11 +177,14 @@ void f2fs_parse_options(int argc, char *argv[])
 				c.fix_on = 1;
 				MSG(0, "Info: Force to fix corruption\n");
 				break;
+			case 'q':
+				c.preserve_limits = atoi(optarg);
+				MSG(0, "Info: Preserve quota limits = %d\n",
+					c.preserve_limits);
+				break;
 			case 't':
 				c.show_dentry = 1;
 				break;
-
-
 			case ':':
 				if (optopt == 'p') {
 					MSG(0, "Info: Use default preen mode\n");
@@ -407,6 +424,7 @@ static void do_fsck(struct f2fs_sb_info *sbi)
 	struct f2fs_checkpoint *ckpt = F2FS_CKPT(sbi);
 	u32 flag = le32_to_cpu(ckpt->ckpt_flags);
 	u32 blk_cnt;
+	errcode_t ret;
 
 	fsck_init(sbi);
 
@@ -429,7 +447,7 @@ static void do_fsck(struct f2fs_sb_info *sbi)
 				c.fix_on = 1;
 			break;
 		}
-	} else {
+	} else if (c.preen_mode) {
 		/*
 		 * we can hit this in 3 situations:
 		 *  1. fsck -f, fix_on has already been set to 1 when
@@ -443,12 +461,23 @@ static void do_fsck(struct f2fs_sb_info *sbi)
 		c.fix_on = 1;
 	}
 
-	fsck_chk_orphan_node(sbi);
+	fsck_chk_quota_node(sbi);
 
 	/* Traverse all block recursively from root inode */
 	blk_cnt = 1;
+
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_QUOTA_INO)) {
+		ret = quota_init_context(sbi);
+		if (ret) {
+			ASSERT_MSG("quota_init_context failure: %d", ret);
+			return;
+		}
+	}
+	fsck_chk_orphan_node(sbi);
 	fsck_chk_node_blk(sbi, NULL, sbi->root_ino_num,
 			F2FS_FT_DIR, TYPE_INODE, &blk_cnt, NULL);
+	fsck_chk_quota_files(sbi);
+
 	fsck_verify(sbi);
 	fsck_free(sbi);
 }

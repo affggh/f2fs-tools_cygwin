@@ -63,7 +63,7 @@ block_t new_node_block(struct f2fs_sb_info *sbi,
 	struct f2fs_checkpoint *ckpt = F2FS_CKPT(sbi);
 	struct f2fs_summary sum;
 	struct node_info ni;
-	block_t blkaddr;
+	block_t blkaddr = NULL_ADDR;
 	int type;
 
 	f2fs_inode = dn->inode_blk;
@@ -105,7 +105,7 @@ block_t new_node_block(struct f2fs_sb_info *sbi,
  *
  * By default, it sets inline_xattr and inline_data
  */
-static int get_node_path(struct f2fs_node *node, unsigned long block,
+static int get_node_path(struct f2fs_node *node, long block,
 				int offset[4], unsigned int noffset[4])
 {
 	const long direct_index = ADDRS_PER_INODE(&node->i);

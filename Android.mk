@@ -4,7 +4,7 @@ LOCAL_PATH:= $(call my-dir)
 ifeq ($(HOST_OS),linux)
 
 # The versions depend on $(LOCAL_PATH)/VERSION
-version_CFLAGS := -DF2FS_MAJOR_VERSION=1 -DF2FS_MINOR_VERSION=8 -DF2FS_TOOLS_VERSION=\"1.8.0\" -DF2FS_TOOLS_DATE=\"2017-02-03\"
+version_CFLAGS := -DF2FS_MAJOR_VERSION=1 -DF2FS_MINOR_VERSION=9 -DF2FS_TOOLS_VERSION=\"1.9.0\" -DF2FS_TOOLS_DATE=\"2017-11-13\"
 common_CFLAGS := -DWITH_ANDROID $(version_CFLAGS) \
     -Wall -Werror \
     -Wno-format \
@@ -127,8 +127,14 @@ LOCAL_SRC_FILES := \
 	fsck/dump.c \
 	fsck/fsck.c \
 	fsck/dir.c \
+	fsck/dict.c \
+	fsck/mkquota.c \
+	fsck/quotaio.c \
+	fsck/quotaio_tree.c \
+	fsck/quotaio_v2.c \
 	fsck/node.c \
 	fsck/segment.c \
+	fsck/xattr.c \
 	fsck/main.c \
 	fsck/mount.c \
 	lib/libf2fs.c \
@@ -148,8 +154,14 @@ LOCAL_SRC_FILES := \
 	fsck/dump.c \
 	fsck/fsck.c \
 	fsck/dir.c \
+	fsck/dict.c \
+	fsck/mkquota.c \
+	fsck/quotaio.c \
+	fsck/quotaio_tree.c \
+	fsck/quotaio_v2.c \
 	fsck/node.c \
 	fsck/segment.c \
+	fsck/xattr.c \
 	fsck/main.c \
 	fsck/mount.c \
 	lib/libf2fs.c \
