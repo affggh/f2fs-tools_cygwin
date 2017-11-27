@@ -49,26 +49,6 @@ include $(BUILD_HOST_STATIC_LIBRARY)
 
 #----------------------------------------------------------
 include $(CLEAR_VARS)
-LOCAL_MODULE := libf2fs_fmt_host_dyn
-LOCAL_SRC_FILES := \
-	lib/libf2fs.c \
-	lib/libf2fs_io.c \
-	mkfs/f2fs_format.c \
-	mkfs/f2fs_format_utils.c \
-
-LOCAL_C_INCLUDES := $(common_C_INCLUDES)
-LOCAL_CFLAGS := $(common_CFLAGS)
-LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include $(LOCAL_PATH)/mkfs
-LOCAL_STATIC_LIBRARIES := \
-	libf2fs_ioutils_host \
-	libext2_uuid \
-	libsparse \
-	libz
-# LOCAL_LDLIBS := -ldl
-include $(BUILD_HOST_SHARED_LIBRARY)
-
-#----------------------------------------------------------
-include $(CLEAR_VARS)
 # The LOCAL_MODULE name is referenced by the code. Don't change it.
 LOCAL_MODULE := mkfs.f2fs
 
