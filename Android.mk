@@ -1,7 +1,7 @@
 LOCAL_PATH:= $(call my-dir)
 
 # f2fs-tools depends on Linux kernel headers being in the system include path.
-ifeq ($(HOST_OS),linux)
+ifneq (,$filter linux darwin,$(HOST_OS))
 
 # The versions depend on $(LOCAL_PATH)/VERSION
 version_CFLAGS := -DF2FS_MAJOR_VERSION=1 -DF2FS_MINOR_VERSION=9 -DF2FS_TOOLS_VERSION=\"1.9.0\" -DF2FS_TOOLS_DATE=\"2017-11-13\"
@@ -46,26 +46,6 @@ LOCAL_C_INCLUDES := $(common_C_INCLUDES)
 LOCAL_CFLAGS := $(common_CFLAGS)
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include $(LOCAL_PATH)/mkfs
 include $(BUILD_HOST_STATIC_LIBRARY)
-
-#----------------------------------------------------------
-include $(CLEAR_VARS)
-LOCAL_MODULE := libf2fs_fmt_host_dyn
-LOCAL_SRC_FILES := \
-	lib/libf2fs.c \
-	lib/libf2fs_io.c \
-	mkfs/f2fs_format.c \
-	mkfs/f2fs_format_utils.c \
-
-LOCAL_C_INCLUDES := $(common_C_INCLUDES)
-LOCAL_CFLAGS := $(common_CFLAGS)
-LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include $(LOCAL_PATH)/mkfs
-LOCAL_STATIC_LIBRARIES := \
-	libf2fs_ioutils_host \
-	libext2_uuid \
-	libsparse \
-	libz
-# LOCAL_LDLIBS := -ldl
-include $(BUILD_HOST_SHARED_LIBRARY)
 
 #----------------------------------------------------------
 include $(CLEAR_VARS)
