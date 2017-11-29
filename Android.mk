@@ -95,8 +95,11 @@ LOCAL_SRC_FILES := \
 
 LOCAL_C_INCLUDES := $(common_C_INCLUDES)
 LOCAL_CFLAGS := $(common_CFLAGS)
-LOCAL_STATIC_LIBRARIES := libf2fs_fmt_host
-LOCAL_SHARED_LIBRARIES := libext2_uuid libsparse
+LOCAL_STATIC_LIBRARIES := \
+	libf2fs_fmt_host \
+	libext2_uuid \
+	libsparse \
+	libz
 include $(BUILD_HOST_EXECUTABLE)
 
 #----------------------------------------------------------
