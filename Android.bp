@@ -129,3 +129,40 @@ cc_binary {
         "libsparse",
     ],
 }
+
+cc_binary {
+    name: "sload_f2fs",
+    defaults: [
+        "f2fs-tools-defaults",
+        "fsck_main_src_files",
+    ],
+    host_supported: true,
+    cflags: ["-DWITH_SLOAD"],
+    srcs: ["fsck/fsck.c", "fsck/sload.c"],
+    target: {
+        android: {
+            shared_libs: [
+                "libext2_uuid",
+                "libbase",
+                "libsparse",
+                "libcrypto",
+                "libselinux",
+                "liblog",
+                "libcutils",
+            ],
+        },
+        host: {
+            static_libs: [
+                "libext2_uuid",
+                "libbase",
+                "libsparse",
+                "libcrypto",
+                "libselinux",
+                "liblog",
+                "libz",
+                "libcutils",
+            ],
+        },
+    },
+    stl: "libc++_static",
+}
