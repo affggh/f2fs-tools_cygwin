@@ -83,6 +83,13 @@ cc_library_host_static {
         "f2fs-tools-defaults",
         "libf2fs_src_files"
     ],
+    target: {
+        windows: {
+            include_dirs: [ "external/e2fsprogs/include/mingw" ],
+            cflags: ["-DANDROID_WINDOWS_HOST"],
+            enabled: true
+	},
+    },
 }
 
 cc_binary {
@@ -112,6 +119,13 @@ cc_binary {
                 "libz",
             ],
         },
+        windows: {
+            include_dirs: [ "external/e2fsprogs/include/mingw" ],
+            cflags: ["-DANDROID_WINDOWS_HOST"],
+            ldflags: ["-static"],
+            host_ldlibs: ["-lws2_32"],
+            enabled: true
+	},
     },
 }
 
