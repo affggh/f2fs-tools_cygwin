@@ -14,38 +14,10 @@ common_CFLAGS := -DWITH_ANDROID $(version_CFLAGS) \
     -Wno-sign-compare \
     -Wno-unused-function \
 
-# Workaround for the <sys/types.h>/<sys/sysmacros.h> split, here now for
-# bionic and coming later for glibc.
-target_CFLAGS := $(common_CFLAGS) -include sys/sysmacros.h
-
 # external/e2fsprogs/lib is needed for uuid/uuid.h
-common_C_INCLUDES := $(LOCAL_PATH)/include external/e2fsprogs/lib/ system/core/libsparse/include
-
-#----------------------------------------------------------
-include $(CLEAR_VARS)
-LOCAL_MODULE := libf2fs_fmt
-LOCAL_SRC_FILES := \
-	lib/libf2fs.c \
-	mkfs/f2fs_format.c \
-	mkfs/f2fs_format_utils.c \
-
-LOCAL_C_INCLUDES := $(common_C_INCLUDES)
-LOCAL_CFLAGS := $(target_CFLAGS)
-LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include $(LOCAL_PATH)/mkfs
-include $(BUILD_STATIC_LIBRARY)
-
-#----------------------------------------------------------
-include $(CLEAR_VARS)
-LOCAL_MODULE := libf2fs_fmt_host
-LOCAL_SRC_FILES := \
-	lib/libf2fs.c \
-	mkfs/f2fs_format.c \
-	mkfs/f2fs_format_utils.c \
-
-LOCAL_C_INCLUDES := $(common_C_INCLUDES)
-LOCAL_CFLAGS := $(common_CFLAGS)
-LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include $(LOCAL_PATH)/mkfs
-include $(BUILD_HOST_STATIC_LIBRARY)
+common_C_INCLUDES := $(LOCAL_PATH)/include \
+    external/e2fsprogs/lib/ \
+    system/core/libsparse/include \
 
 #----------------------------------------------------------
 include $(CLEAR_VARS)
@@ -58,102 +30,16 @@ LOCAL_FORCE_STATIC_EXECUTABLE := true
 LOCAL_MODULE_PATH := $(TARGET_RECOVERY_ROOT_OUT)/sbin
 
 LOCAL_SRC_FILES := \
-	lib/libf2fs_io.c \
-	mkfs/f2fs_format_main.c
-LOCAL_C_INCLUDES := $(common_C_INCLUDES)
-LOCAL_CFLAGS := $(target_CFLAGS)
-LOCAL_STATIC_LIBRARIES := \
-	libf2fs_fmt \
-	libext2_uuid \
-	libsparse \
-	libz
-LOCAL_MODULE_TAGS := optional
-include $(BUILD_EXECUTABLE)
-
-#----------------------------------------------------------
-include $(CLEAR_VARS)
-LOCAL_MODULE := make_f2fs
-
-LOCAL_SRC_FILES := \
-	lib/libf2fs_io.c \
-	mkfs/f2fs_format_main.c
-LOCAL_C_INCLUDES := $(common_C_INCLUDES)
-LOCAL_CFLAGS := $(target_CFLAGS)
-LOCAL_STATIC_LIBRARIES := libf2fs_fmt
-LOCAL_SHARED_LIBRARIES := libext2_uuid libsparse
-LOCAL_SYSTEM_SHARED_LIBRARIES := libc
-LOCAL_MODULE_TAGS := optional
-include $(BUILD_EXECUTABLE)
-
-#----------------------------------------------------------
-include $(CLEAR_VARS)
-LOCAL_MODULE := make_f2fs
-
-LOCAL_SRC_FILES := \
-	mkfs/f2fs_format_main.c \
-	lib/libf2fs_io.c \
-
+    lib/libf2fs_io.c \
+    mkfs/f2fs_format_main.c
 LOCAL_C_INCLUDES := $(common_C_INCLUDES)
 LOCAL_CFLAGS := $(common_CFLAGS)
 LOCAL_STATIC_LIBRARIES := \
-	libf2fs_fmt_host \
-	libext2_uuid \
-	libsparse \
-	libz
-include $(BUILD_HOST_EXECUTABLE)
-
-#----------------------------------------------------------
-include $(CLEAR_VARS)
-# The LOCAL_MODULE name is referenced by the code. Don't change it.
-LOCAL_MODULE := fsck.f2fs
-LOCAL_SRC_FILES := \
-	fsck/dump.c \
-	fsck/fsck.c \
-	fsck/dir.c \
-	fsck/dict.c \
-	fsck/mkquota.c \
-	fsck/quotaio.c \
-	fsck/quotaio_tree.c \
-	fsck/quotaio_v2.c \
-	fsck/node.c \
-	fsck/segment.c \
-	fsck/xattr.c \
-	fsck/main.c \
-	fsck/mount.c \
-	lib/libf2fs.c \
-	lib/libf2fs_io.c \
-
-LOCAL_C_INCLUDES := $(common_C_INCLUDES)
-LOCAL_CFLAGS := $(target_CFLAGS)
-LOCAL_SHARED_LIBRARIES := libext2_uuid libsparse
-LOCAL_SYSTEM_SHARED_LIBRARIES := libc
-LOCAL_MODULE_TAGS := optional
+    libf2fs_fmt \
+    libext2_uuid \
+    libsparse \
+    libz
+LOCAL_WHOLE_STATIC_LIBRARIES := libbase
 include $(BUILD_EXECUTABLE)
-
-#----------------------------------------------------------
-include $(CLEAR_VARS)
-LOCAL_MODULE := fsck.f2fs
-LOCAL_SRC_FILES := \
-	fsck/dump.c \
-	fsck/fsck.c \
-	fsck/dir.c \
-	fsck/dict.c \
-	fsck/mkquota.c \
-	fsck/quotaio.c \
-	fsck/quotaio_tree.c \
-	fsck/quotaio_v2.c \
-	fsck/node.c \
-	fsck/segment.c \
-	fsck/xattr.c \
-	fsck/main.c \
-	fsck/mount.c \
-	lib/libf2fs.c \
-	lib/libf2fs_io.c \
-
-LOCAL_C_INCLUDES := $(common_C_INCLUDES)
-LOCAL_CFLAGS := $(common_CFLAGS)
-LOCAL_SHARED_LIBRARIES := libsparse
-LOCAL_HOST_SHARED_LIBRARIES :=  libext2_uuid
-include $(BUILD_HOST_EXECUTABLE)
 
 endif
