@@ -47,6 +47,9 @@ void update_free_segments(struct f2fs_sb_info *sbi)
 	char *progress = "-*|*-";
 	static int i = 0;
 
+	if (c.dbg_lv)
+		return;
+
 	MSG(0, "\r [ %c ] Free segments: 0x%x", progress[i % 5], get_free_segments(sbi));
 	fflush(stdout);
 	i++;
@@ -222,10 +225,15 @@ void print_inode_info(struct f2fs_sb_info *sbi,
 			le32_to_cpu(inode->i_ext.blk_addr),
 			le32_to_cpu(inode->i_ext.len));
 
-	DISP_u16(inode, i_extra_isize);
-	DISP_u16(inode, i_inline_xattr_size);
-	DISP_u32(inode, i_projid);
-	DISP_u32(inode, i_inode_checksum);
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_EXTRA_ATTR)) {
+		DISP_u16(inode, i_extra_isize);
+		if (c.feature & cpu_to_le32(F2FS_FEATURE_FLEXIBLE_INLINE_XATTR))
+			DISP_u16(inode, i_inline_xattr_size);
+		if (c.feature & cpu_to_le32(F2FS_FEATURE_PRJQUOTA))
+			DISP_u32(inode, i_projid);
+		if (c.feature & cpu_to_le32(F2FS_FEATURE_INODE_CHKSUM))
+			DISP_u32(inode, i_inode_checksum);
+	}
 
 	DISP_u32(inode, i_addr[ofs]);		/* Pointers to data blocks */
 	DISP_u32(inode, i_addr[ofs + 1]);	/* Pointers to data blocks */
@@ -424,22 +432,22 @@ void print_sb_state(struct f2fs_super_block *sb)
 		MSG(0, "%s", " encrypt");
 	}
 	if (f & cpu_to_le32(F2FS_FEATURE_BLKZONED)) {
-		MSG(0, "%s", " zoned block device");
+		MSG(0, "%s", " blkzoned");
 	}
 	if (f & cpu_to_le32(F2FS_FEATURE_EXTRA_ATTR)) {
-		MSG(0, "%s", " extra attribute");
+		MSG(0, "%s", " extra_attr");
 	}
 	if (f & cpu_to_le32(F2FS_FEATURE_PRJQUOTA)) {
-		MSG(0, "%s", " project quota");
+		MSG(0, "%s", " project_quota");
 	}
 	if (f & cpu_to_le32(F2FS_FEATURE_INODE_CHKSUM)) {
-		MSG(0, "%s", " inode checksum");
+		MSG(0, "%s", " inode_checksum");
 	}
 	if (f & cpu_to_le32(F2FS_FEATURE_FLEXIBLE_INLINE_XATTR)) {
-		MSG(0, "%s", " flexible inline xattr");
+		MSG(0, "%s", " flexible_inline_xattr");
 	}
 	if (f & cpu_to_le32(F2FS_FEATURE_QUOTA_INO)) {
-		MSG(0, "%s", " quota ino");
+		MSG(0, "%s", " quota_ino");
 	}
 	MSG(0, "\n");
 	MSG(0, "Info: superblock encrypt level = %d, salt = ",
@@ -582,6 +590,7 @@ int sanity_check_raw_super(struct f2fs_super_block *sb, u64 offset)
 int validate_super_block(struct f2fs_sb_info *sbi, int block)
 {
 	u64 offset;
+	char buf[F2FS_BLKSIZE];
 
 	sbi->raw_super = malloc(sizeof(struct f2fs_super_block));
 
@@ -590,8 +599,11 @@ int validate_super_block(struct f2fs_sb_info *sbi, int block)
 	else
 		offset = F2FS_BLKSIZE + F2FS_SUPER_OFFSET;
 
-	if (dev_read(sbi->raw_super, offset, sizeof(struct f2fs_super_block)))
+	if (dev_read_block(buf, block))
 		return -1;
+
+	memcpy(sbi->raw_super, buf + F2FS_SUPER_OFFSET,
+					sizeof(struct f2fs_super_block));
 
 	if (!sanity_check_raw_super(sbi->raw_super, offset)) {
 		/* get kernel version */
@@ -2093,7 +2105,8 @@ void write_checkpoint(struct f2fs_sb_info *sbi)
 		write_nat_bits(sbi, sb, cp, sbi->cur_cp);
 
 	/* in case of sudden power off */
-	f2fs_fsync_device();
+	ret = f2fs_fsync_device();
+	ASSERT(ret >= 0);
 
 	/* write the last cp */
 	ret = dev_write_block(cp, cp_blk_no++);

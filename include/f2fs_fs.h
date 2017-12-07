@@ -22,6 +22,11 @@
 
 #ifdef WITH_ANDROID
 #include <android_config.h>
+#else
+#define WITH_DUMP
+#define WITH_DEFRAG
+#define WITH_RESIZE
+#define WITH_SLOAD
 #endif
 
 #include <inttypes.h>
@@ -32,6 +37,11 @@
 
 #ifdef HAVE_LINUX_BLKZONED_H
 #include <linux/blkzoned.h>
+#endif
+
+#ifdef HAVE_LIBSELINUX
+#include <selinux/selinux.h>
+#include <selinux/label.h>
 #endif
 
 #ifdef UNUSED
@@ -274,6 +284,7 @@ static inline uint64_t bswap_64(uint64_t val)
 #define VERSION_LEN	256
 
 enum f2fs_config_func {
+	MKFS,
 	FSCK,
 	DUMP,
 	DEFRAG,
@@ -354,6 +365,13 @@ struct f2fs_configuration {
 	/* sload parameters */
 	char *from_dir;
 	char *mount_point;
+	char *target_out_dir;
+	char *fs_config_file;
+	time_t fixed_time;
+#ifdef HAVE_LIBSELINUX
+	struct selinux_opt seopt_file[8];
+	int nr_opt;
+#endif
 
 	/* precomputed fs UUID checksum for seeding other checksums */
 	u_int32_t chksum_seed;
@@ -1060,8 +1078,9 @@ extern int f2fs_devs_are_umounted(void);
 extern int f2fs_dev_is_umounted(char *);
 extern int f2fs_get_device_info(void);
 extern int get_device_info(int);
-extern void f2fs_finalize_device(void);
-extern void f2fs_fsync_device(void);
+extern int f2fs_init_sparse_file(void);
+extern int f2fs_finalize_device(void);
+extern int f2fs_fsync_device(void);
 
 extern int dev_read(void *, __u64, size_t);
 extern int dev_write(void *, __u64, size_t);

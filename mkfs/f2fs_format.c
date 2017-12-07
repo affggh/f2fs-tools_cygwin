@@ -1042,6 +1042,7 @@ static int f2fs_write_root_inode(void)
 			c.blks_per_seg, main_area_node_seg_blk_offset);
 	if (dev_write_block(raw_node, main_area_node_seg_blk_offset)) {
 		MSG(1, "\tError: While writing the raw_node to disk!!!\n");
+		free(raw_node);
 		return -1;
 	}
 
@@ -1052,13 +1053,16 @@ static int f2fs_write_root_inode(void)
 
 #ifndef WITH_ANDROID
 	if (discard_obsolete_dnode(raw_node, main_area_node_seg_blk_offset)) {
+		free(raw_node);
 		return -1;
 	}
 #endif
+	free(raw_node);
 	return 0;
 }
 
-static int f2fs_write_default_quota(int qtype, unsigned int blkaddr)
+static int f2fs_write_default_quota(int qtype, unsigned int blkaddr,
+						__le32 raw_id)
 {
 	char *filebuf = calloc(F2FS_BLKSIZE, 2);
 	int file_magics[] = INITQMAGICS;
@@ -1095,7 +1099,7 @@ static int f2fs_write_default_quota(int qtype, unsigned int blkaddr)
 
 	filebuf[5120 + 8] = 1;
 
-	dqblk.dqb_id = cpu_to_le32(0);
+	dqblk.dqb_id = raw_id;
 	dqblk.dqb_pad = cpu_to_le32(0);
 	dqblk.dqb_ihardlimit = cpu_to_le64(0);
 	dqblk.dqb_isoftlimit = cpu_to_le64(0);
@@ -1115,7 +1119,8 @@ static int f2fs_write_default_quota(int qtype, unsigned int blkaddr)
 		free(filebuf);
 		return -1;
 	}
-
+	DBG(1, "\tWriting quota data, at offset %08x, %08x\n",
+					blkaddr, blkaddr + 1);
 	free(filebuf);
 	return 0;
 }
@@ -1125,6 +1130,7 @@ static int f2fs_write_qf_inode(int qtype)
 	struct f2fs_node *raw_node = NULL;
 	u_int64_t data_blk_nor;
 	u_int64_t main_area_node_seg_blk_offset = 0;
+	__le32 raw_id;
 	int i;
 
 	raw_node = calloc(F2FS_BLKSIZE, 1);
@@ -1176,9 +1182,17 @@ static int f2fs_write_qf_inode(int qtype)
 	for (i = 0; i < qtype; i++)
 		if (sb->qf_ino[i])
 			data_blk_nor += QUOTA_DATA(i);
+	if (qtype == 0)
+		raw_id = raw_node->i.i_uid;
+	else if (qtype == 1)
+		raw_id = raw_node->i.i_gid;
+	else if (qtype == 2)
+		raw_id = raw_node->i.i_projid;
+	else
+		ASSERT(0);
 
 	/* write two blocks */
-	if (f2fs_write_default_quota(qtype, data_blk_nor)) {
+	if (f2fs_write_default_quota(qtype, data_blk_nor, raw_id)) {
 		free(raw_node);
 		return -1;
 	}
