@@ -106,16 +106,16 @@ cc_binary {
             ],
             shared_libs: [
                 "libext2_uuid",
-                "libbase",
                 "libsparse",
+                "libbase",
             ],
         },
         host: {
             static_libs: [
 	        "libf2fs_fmt_host",
                 "libext2_uuid",
-                "libbase",
                 "libsparse",
+                "libbase",
                 "libz",
             ],
         },
@@ -139,8 +139,8 @@ cc_binary {
     srcs: ["fsck/fsck.c"],
     shared_libs: [
         "libext2_uuid",
-        "libbase",
         "libsparse",
+        "libbase",
     ],
 }
 
@@ -157,24 +157,24 @@ cc_binary {
         android: {
             shared_libs: [
                 "libext2_uuid",
-                "libbase",
                 "libsparse",
+                "libbase",
                 "libcrypto",
                 "libselinux",
-                "liblog",
                 "libcutils",
+                "liblog",
             ],
         },
         host: {
             static_libs: [
                 "libext2_uuid",
-                "libbase",
                 "libsparse",
+                "libbase",
                 "libcrypto",
                 "libselinux",
+                "libcutils",
                 "liblog",
                 "libz",
-                "libcutils",
             ],
         },
     },
