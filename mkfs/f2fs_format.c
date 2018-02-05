@@ -291,9 +291,7 @@ static int f2fs_prepare_super_block(void)
 	 * When sit is too large, we should expand cp area. It requires more
 	 * pages for cp.
 	 */
-	if (max_sit_bitmap_size >
-			(CHECKSUM_OFFSET -
-				sizeof(struct f2fs_checkpoint) + 1 - 64)) {
+	if (max_sit_bitmap_size > MAX_SIT_BITMAP_SIZE_IN_CKPT) {
 		max_nat_bitmap_size = CHECKSUM_OFFSET -
 				sizeof(struct f2fs_checkpoint) + 1;
 		set_sb(cp_payload, F2FS_BLK_ALIGN(max_sit_bitmap_size));
@@ -576,6 +574,7 @@ static int f2fs_write_check_point_pack(void)
 	}
 
 	/* 1. cp page 1 of checkpoint pack 1 */
+	srand(time(NULL));
 	cp->checkpoint_ver = cpu_to_le64(rand() | 0x1);
 	set_cp(cur_node_segno[0], c.cur_seg[CURSEG_HOT_NODE]);
 	set_cp(cur_node_segno[1], c.cur_seg[CURSEG_WARM_NODE]);
@@ -1021,6 +1020,11 @@ static int f2fs_write_root_inode(void)
 
 	if (c.feature & cpu_to_le32(F2FS_FEATURE_PRJQUOTA))
 		raw_node->i.i_projid = cpu_to_le32(F2FS_DEF_PROJID);
+
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_INODE_CRTIME)) {
+		raw_node->i.i_crtime = cpu_to_le32(time(NULL));
+		raw_node->i.i_crtime_nsec = 0;
+	}
 
 	data_blk_nor = get_sb(main_blkaddr) +
 		c.cur_seg[CURSEG_HOT_DATA] * c.blks_per_seg;

@@ -530,7 +530,7 @@ int fsck_chk_node_blk(struct f2fs_sb_info *sbi, struct f2fs_inode *inode,
 
 		if (sanity_check_inode(sbi, node_blk))
 			goto err;
-		fsck_chk_inode_blk(sbi, nid, ftype, node_blk, blk_cnt, &ni);
+		fsck_chk_inode_blk(sbi, nid, ftype, node_blk, blk_cnt, &ni, child);
 		quota_add_inode_usage(fsck->qctx, nid, &node_blk->i);
 	} else {
 		switch (ntype) {
@@ -624,7 +624,7 @@ unmatched:
 /* start with valid nid and blkaddr */
 void fsck_chk_inode_blk(struct f2fs_sb_info *sbi, u32 nid,
 		enum FILE_TYPE ftype, struct f2fs_node *node_blk,
-		u32 *blk_cnt, struct node_info *ni)
+		u32 *blk_cnt, struct node_info *ni, struct child_info *child_d)
 {
 	struct f2fs_fsck *fsck = F2FS_FSCK(sbi);
 	struct child_info child;
@@ -740,7 +740,7 @@ void fsck_chk_inode_blk(struct f2fs_sb_info *sbi, u32 nid,
 	for (idx = 0; idx < 5; idx++) {
 		u32 nid = le32_to_cpu(node_blk->i.i_nid[idx]);
 
-		if (nid != 0) {
+		if (nid != 0 && IS_VALID_NID(sbi, nid)) {
 			struct node_info ni;
 
 			get_node_info(sbi, nid, &ni);
@@ -766,7 +766,7 @@ void fsck_chk_inode_blk(struct f2fs_sb_info *sbi, u32 nid,
 					blkaddr,
 					&child, (i_blocks == *blk_cnt),
 					ftype, nid, idx, ni->version,
-					file_enc_name(&node_blk->i));
+					file_is_encrypt(&node_blk->i));
 			if (!ret) {
 				*blk_cnt = *blk_cnt + 1;
 			} else if (c.fix_on) {
@@ -841,8 +841,23 @@ skip_blkcnt_fix:
 	en = malloc(F2FS_NAME_LEN + 1);
 	ASSERT(en);
 
-	namelen = convert_encrypted_name(node_blk->i.i_name,
-					le32_to_cpu(node_blk->i.i_namelen),
+	namelen = le32_to_cpu(node_blk->i.i_namelen);
+	if (namelen > F2FS_NAME_LEN) {
+		if (child_d && child_d->i_namelen <= F2FS_NAME_LEN) {
+			ASSERT_MSG("ino: 0x%x has i_namelen: 0x%x, "
+					"but has %d characters for name",
+					nid, namelen, child_d->i_namelen);
+			if (c.fix_on) {
+				FIX_MSG("[0x%x] i_namelen=0x%x -> 0x%x", nid, namelen,
+					child_d->i_namelen);
+				node_blk->i.i_namelen = cpu_to_le32(child_d->i_namelen);
+				need_fix = 1;
+			}
+			namelen = child_d->i_namelen;
+		} else
+			namelen = F2FS_NAME_LEN;
+	}
+	namelen = convert_encrypted_name(node_blk->i.i_name, namelen,
 					en, file_enc_name(&node_blk->i));
 	en[namelen] = '\0';
 	if (ftype == F2FS_FT_ORPHAN)
@@ -959,7 +974,7 @@ int fsck_chk_dnode_blk(struct f2fs_sb_info *sbi, struct f2fs_inode *inode,
 			blkaddr, child,
 			le64_to_cpu(inode->i_blocks) == *blk_cnt, ftype,
 			nid, idx, ni->version,
-			file_enc_name(inode));
+			file_is_encrypt(inode));
 		if (!ret) {
 			*blk_cnt = *blk_cnt + 1;
 		} else if (c.fix_on) {
@@ -1089,6 +1104,8 @@ int convert_encrypted_name(unsigned char *name, int len,
 				unsigned char *new, int enc_name)
 {
 	if (!enc_name) {
+		if (len > F2FS_NAME_LEN)
+			len = F2FS_NAME_LEN;
 		memcpy(new, name, len);
 		new[len] = 0;
 		return len;
@@ -1405,9 +1422,10 @@ static int __chk_dentries(struct f2fs_sb_info *sbi, struct child_info *child,
 				dentry, max, i, last_blk, enc_name);
 
 		blk_cnt = 1;
+		child->i_namelen = name_len;
 		ret = fsck_chk_node_blk(sbi,
 				NULL, le32_to_cpu(dentry[i].ino),
-				ftype, TYPE_INODE, &blk_cnt, NULL);
+				ftype, TYPE_INODE, &blk_cnt, child);
 
 		if (ret && c.fix_on) {
 			int j;
@@ -1416,7 +1434,7 @@ static int __chk_dentries(struct f2fs_sb_info *sbi, struct child_info *child,
 				test_and_clear_bit_le(i + j, bitmap);
 			FIX_MSG("Unlink [0x%x] - %s len[0x%x], type[0x%x]",
 					le32_to_cpu(dentry[i].ino),
-					name, name_len,
+					en, name_len,
 					dentry[i].file_type);
 			fixed = 1;
 		} else if (ret == 0) {
@@ -1448,7 +1466,7 @@ int fsck_chk_inline_dentries(struct f2fs_sb_info *sbi,
 	fsck->dentry_depth++;
 	dentries = __chk_dentries(sbi, child,
 			d.bitmap, d.dentry, d.filename, d.max, 1,
-			file_enc_name(&node_blk->i));
+			file_is_encrypt(&node_blk->i));
 	if (dentries < 0) {
 		DBG(1, "[%3d] Inline Dentry Block Fixed hash_codes\n\n",
 			fsck->dentry_depth);
@@ -1918,6 +1936,7 @@ static void fix_checkpoint(struct f2fs_sb_info *sbi)
 	set_cp(cp_pack_total_block_count, 8 + orphan_blks + get_sb(cp_payload));
 
 	flags = update_nat_bits_flags(sb, cp, flags);
+	flags |= CP_NOCRC_RECOVERY_FLAG;
 	set_cp(ckpt_flags, flags);
 
 	set_cp(free_segment_count, get_free_segments(sbi));
