@@ -812,8 +812,15 @@ int get_device_info(int i)
 #ifdef BLKSSZGET
 		if (ioctl(fd, BLKSSZGET, &sector_size) < 0)
 			MSG(0, "\tError: Using the default sector size\n");
-		else if (dev->sector_size < sector_size)
+		else if (dev->sector_size < sector_size){
+			/*
+			 * wanted_total_sectors need to be reset by new
+			 * sector_size.
+			 */
+			c.wanted_total_sectors = (c.wanted_total_sectors *
+						dev->sector_size) / sector_size;
 			dev->sector_size = sector_size;
+		}
 #endif
 #ifdef BLKGETSIZE64
 		if (ioctl(fd, BLKGETSIZE64, &dev->total_sectors) < 0) {
