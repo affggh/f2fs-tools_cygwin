@@ -39,6 +39,8 @@ static int run(char *cmd)
 
 	switch (fork()) {
 	case 0:
+		/* redirect stderr to stdout */
+		dup2(1, 2);
 		execl("/system/bin/sh", "sh", "-c", cmd, (char *) 0);
 	default:
 		wait(&status);
