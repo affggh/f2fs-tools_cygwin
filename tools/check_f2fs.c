@@ -45,14 +45,15 @@ static int run(char *cmd)
 	default:
 		wait(&status);
 	}
+	return 0;
 }
 
 static int test_atomic_write(char *path)
 {
-	int db, ret, written, i;
+	int db, ret, written;
 
 	printf("\tOpen  %s... \n", path);
-	db = open(path, O_RDWR|O_CREAT);
+	db = open(path, O_RDWR|O_CREAT, 0666);
 	if (db < 0) {
 		printf("open failed errno:%d\n", errno);
 		return -1;
@@ -81,10 +82,8 @@ static int test_atomic_write(char *path)
 	return 0;
 }
 
-int main(int argc, char **argv)
+int main(void)
 {
-	int db, ret, written, i;
-
 	memset(buf, 0xff, BLOCKS);
 
 	printf("# Test 0: Check F2FS support\n");
