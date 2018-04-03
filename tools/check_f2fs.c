@@ -24,6 +24,7 @@
 
 #define DB1_PATH "/data/database_file1"
 #define DB2_PATH "/sdcard/database_file2"
+#define FILE_PATH "/data/testfile"
 
 #define BLOCK 4096
 #define BLOCKS (2 * BLOCK)
@@ -82,6 +83,48 @@ static int test_atomic_write(char *path)
 	return 0;
 }
 
+static int test_bad_write_call(char *path)
+{
+	int fd, written;
+	struct stat sb;
+	int large_size = 1024 * 1024 * 100;	/* 100 MB */
+
+	printf("\tOpen  %s... \n", path);
+	fd = open(path, O_RDWR|O_CREAT|O_TRUNC, 0666);
+	if (fd < 0) {
+		printf("open failed errno:%d\n", errno);
+		return -1;
+	}
+
+	/* 8KB-sized buffer, but submit 100 MB size */
+	printf("\tWrite to the %dkB ... \n", BLOCKS / 1024);
+	written = write(fd, buf, large_size);
+	if (written != BLOCKS)
+		printf("Ok: write fail written:%d, errno:%d\n", written, errno);
+	close(fd);
+
+	fd = open(path, O_RDONLY);
+	if (fd < 0) {
+		printf("open failed errno:%d\n", errno);
+		return -1;
+	}
+
+	if (stat(path, &sb) == -1) {
+		printf("stat failed errno:%d\n", errno);
+		return -1;
+	}
+
+	if (sb.st_size / 512 != sb.st_blocks) {
+		printf("FAIL: Mismatch i_size and i_blocks: %lld %lld\n",
+			(long long)sb.st_size, (long long)sb.st_blocks);
+		printf("FAIL: missing patch "
+			"\"f2fs: do not preallocate blocks which has wrong buffer\"\n");
+	}
+	close(fd);
+	unlink(path);
+	return 0;
+}
+
 int main(void)
 {
 	memset(buf, 0xff, BLOCKS);
@@ -106,6 +149,10 @@ int main(void)
 
 	printf("# Test 3: Atomic_write on /sdcard\n");
 	if (test_atomic_write(DB2_PATH))
+		return -1;
+
+	printf("# Test 4: Bad write(2) call\n");
+	if (test_bad_write_call(FILE_PATH))
 		return -1;
 	return 0;
 }
