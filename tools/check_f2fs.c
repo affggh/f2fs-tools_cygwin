@@ -114,7 +114,7 @@ static int test_bad_write_call(char *path)
 		return -1;
 	}
 
-	if (sb.st_size / 512 != sb.st_blocks) {
+	if ((long long)sb.st_size / 512 != (long long)sb.st_blocks) {
 		printf("FAIL: Mismatch i_size and i_blocks: %lld %lld\n",
 			(long long)sb.st_size, (long long)sb.st_blocks);
 		printf("FAIL: missing patch "
