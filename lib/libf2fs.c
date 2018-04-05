@@ -593,6 +593,7 @@ void f2fs_init_configuration(void)
 	c.blks_per_seg = DEFAULT_BLOCKS_PER_SEGMENT;
 	c.rootdev_name = get_rootdev();
 	c.wanted_total_sectors = -1;
+	c.wanted_sector_size = -1;
 	c.zoned_mode = 0;
 	c.zoned_model = 0;
 	c.zone_blocks = 0;
@@ -655,7 +656,7 @@ int f2fs_dev_is_umounted(char *path)
 #ifdef ANDROID_WINDOWS_HOST
 	return 0;
 #else
-	struct stat st_buf;
+	struct stat *st_buf;
 	int is_rootdev = 0;
 	int ret = 0;
 
@@ -702,16 +703,19 @@ int f2fs_dev_is_umounted(char *path)
 	 * If f2fs is umounted with -l, the process can still use
 	 * the file system. In this case, we should not format.
 	 */
-	if (stat(path, &st_buf) == 0 && S_ISBLK(st_buf.st_mode)) {
+	st_buf = malloc(sizeof(struct stat));
+	if (stat(path, st_buf) == 0 && S_ISBLK(st_buf->st_mode)) {
 		int fd = open(path, O_RDONLY | O_EXCL);
 
 		if (fd >= 0) {
 			close(fd);
 		} else if (errno == EBUSY) {
 			MSG(0, "\tError: In use by the system!\n");
+			free(st_buf);
 			return -1;
 		}
 	}
+	free(st_buf);
 	return ret;
 #endif
 }
@@ -763,7 +767,7 @@ int get_device_info(int i)
 #ifndef BLKGETSIZE64
 	uint32_t total_sectors;
 #endif
-	struct stat stat_buf;
+	struct stat *stat_buf;
 #ifdef HDIO_GETGIO
 	struct hd_geometry geom;
 #endif
@@ -799,16 +803,18 @@ int get_device_info(int i)
 		}
 	}
 
-	if (fstat(fd, &stat_buf) < 0 ) {
+	stat_buf = malloc(sizeof(struct stat));
+	if (fstat(fd, stat_buf) < 0 ) {
 		MSG(0, "\tError: Failed to get the device stat!\n");
+		free(stat_buf);
 		return -1;
 	}
 
 	if (c.sparse_mode) {
 		dev->total_sectors = c.device_size / dev->sector_size;
-	} else if (S_ISREG(stat_buf.st_mode)) {
-		dev->total_sectors = stat_buf.st_size / dev->sector_size;
-	} else if (S_ISBLK(stat_buf.st_mode)) {
+	} else if (S_ISREG(stat_buf->st_mode)) {
+		dev->total_sectors = stat_buf->st_size / dev->sector_size;
+	} else if (S_ISBLK(stat_buf->st_mode)) {
 #ifdef BLKSSZGET
 		if (ioctl(fd, BLKSSZGET, &sector_size) < 0)
 			MSG(0, "\tError: Using the default sector size\n");
@@ -818,11 +824,13 @@ int get_device_info(int i)
 #ifdef BLKGETSIZE64
 		if (ioctl(fd, BLKGETSIZE64, &dev->total_sectors) < 0) {
 			MSG(0, "\tError: Cannot get the device size\n");
+			free(stat_buf);
 			return -1;
 		}
 #else
 		if (ioctl(fd, BLKGETSIZE, &total_sectors) < 0) {
 			MSG(0, "\tError: Cannot get the device size\n");
+			free(stat_buf);
 			return -1;
 		}
 		dev->total_sectors = total_sectors;
@@ -863,6 +871,7 @@ int get_device_info(int i)
 #endif
 	} else {
 		MSG(0, "\tError: Volume type is not supported!!!\n");
+		free(stat_buf);
 		return -1;
 	}
 
@@ -871,11 +880,12 @@ int get_device_info(int i)
 		c.sectors_per_blk = F2FS_BLKSIZE / c.sector_size;
 	} else if (c.sector_size != c.devices[i].sector_size) {
 		MSG(0, "\tError: Different sector sizes!!!\n");
+		free(stat_buf);
 		return -1;
 	}
 
 #if !defined(WITH_ANDROID) && defined(__linux__)
-	if (S_ISBLK(stat_buf.st_mode))
+	if (S_ISBLK(stat_buf->st_mode))
 		f2fs_get_zoned_model(i);
 
 	if (dev->zoned_model != F2FS_ZONED_NONE) {
@@ -884,11 +894,13 @@ int get_device_info(int i)
 
 		if (f2fs_get_zone_blocks(i)) {
 			MSG(0, "\tError: Failed to get number of blocks per zone\n");
+			free(stat_buf);
 			return -1;
 		}
 
 		if (f2fs_check_zones(i)) {
 			MSG(0, "\tError: Failed to check zone configuration\n");
+			free(stat_buf);
 			return -1;
 		}
 		MSG(0, "Info: Host-%s zoned block device:\n",
@@ -900,7 +912,20 @@ int get_device_info(int i)
 				dev->zone_blocks);
 	}
 #endif
+	/* adjust wanted_total_sectors */
+	if (c.wanted_total_sectors != -1) {
+		MSG(0, "Info: wanted sectors = %"PRIu64" (in %"PRIu64" bytes)\n",
+				c.wanted_total_sectors, c.wanted_sector_size);
+		if (c.wanted_sector_size == -1) {
+			c.wanted_sector_size = dev->sector_size;
+		} else if (dev->sector_size != c.wanted_sector_size) {
+			c.wanted_total_sectors *= c.wanted_sector_size;
+			c.wanted_total_sectors /= dev->sector_size;
+		}
+	}
+
 	c.total_sectors += dev->total_sectors;
+	free(stat_buf);
 	return 0;
 }
 

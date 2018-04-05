@@ -180,3 +180,10 @@ cc_binary {
     },
     stl: "libc++_static",
 }
+
+cc_binary {
+    name: "check_f2fs",
+    host_supported: false,
+    cflags: ["--static"],
+    srcs: ["tools/check_f2fs.c"],
+}
