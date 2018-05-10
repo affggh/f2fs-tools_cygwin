@@ -106,7 +106,7 @@ static int set_perms_and_caps(struct dentry *de)
 
 	/* Permissions */
 	if (fs_config_func != NULL) {
-		fs_config_func(mnt_path, S_ISDIR(de->mode),
+		fs_config_func(mnt_path, de->file_type == F2FS_FT_DIR,
 				c.target_out_dir, &uid, &gid, &imode,
 				&capabilities);
 		de->uid = uid & 0xffff;
@@ -157,7 +157,7 @@ static void set_inode_metadata(struct dentry *de)
 
 	de->size = stat.st_size;
 	de->mode = stat.st_mode &
-			(S_ISUID|S_ISGID|S_ISVTX|S_IRWXU|S_IRWXG|S_IRWXO);
+			(S_IFMT|S_ISUID|S_ISGID|S_ISVTX|S_IRWXU|S_IRWXG|S_IRWXO);
 	if (c.fixed_time == -1 && c.from_dir)
 		de->mtime = stat.st_mtime;
 	else
