@@ -86,7 +86,11 @@ cc_library_host_static {
     target: {
         windows: {
             include_dirs: [ "external/e2fsprogs/include/mingw" ],
-            cflags: ["-DANDROID_WINDOWS_HOST"],
+            cflags: [
+                "-DANDROID_WINDOWS_HOST",
+                "-Wno-typedef-redefinition",
+                "-Wno-unused-parameter",
+            ],
             enabled: true
 	},
     },
