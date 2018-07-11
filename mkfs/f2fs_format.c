@@ -68,6 +68,16 @@ const char *media_ext_lists[] = {
 	NULL
 };
 
+const char *hot_ext_lists[] = {
+	"db",
+	NULL
+};
+
+const char **default_ext_list[] = {
+	media_ext_lists,
+	hot_ext_lists
+};
+
 static bool is_extension_exist(const char *name)
 {
 	int i;
@@ -83,44 +93,55 @@ static bool is_extension_exist(const char *name)
 
 static void cure_extension_list(void)
 {
-	const char **extlist = media_ext_lists;
-	char *ext_str = c.extension_list;
+	const char **extlist;
+	char *ext_str;
 	char *ue;
 	int name_len;
-	int i = 0;
+	int i, pos = 0;
 
 	set_sb(extension_count, 0);
 	memset(sb->extension_list, 0, sizeof(sb->extension_list));
 
-	while (*extlist) {
-		name_len = strlen(*extlist);
-		memcpy(sb->extension_list[i++], *extlist, name_len);
-		extlist++;
-	}
-	set_sb(extension_count, i);
+	for (i = 0; i < 2; i++) {
+		ext_str = c.extension_list[i];
+		extlist = default_ext_list[i];
 
-	if (!ext_str)
-		return;
-
-	/* add user ext list */
-	ue = strtok(ext_str, ", ");
-	while (ue != NULL) {
-		name_len = strlen(ue);
-		if (name_len >= 8) {
-			MSG(0, "\tWarn: Extension name (%s) is too long\n", ue);
-			goto next;
+		while (*extlist) {
+			name_len = strlen(*extlist);
+			memcpy(sb->extension_list[pos++], *extlist, name_len);
+			extlist++;
 		}
-		if (!is_extension_exist(ue))
-			memcpy(sb->extension_list[i++], ue, name_len);
+		if (i == 0)
+			set_sb(extension_count, pos);
+		else
+			sb->hot_ext_count = pos - get_sb(extension_count);;
+
+		if (!ext_str)
+			continue;
+
+		/* add user ext list */
+		ue = strtok(ext_str, ", ");
+		while (ue != NULL) {
+			name_len = strlen(ue);
+			if (name_len >= 8) {
+				MSG(0, "\tWarn: Extension name (%s) is too long\n", ue);
+				goto next;
+			}
+			if (!is_extension_exist(ue))
+				memcpy(sb->extension_list[pos++], ue, name_len);
 next:
-		ue = strtok(NULL, ", ");
-		if (i >= F2FS_MAX_EXTENSION)
-			break;
+			ue = strtok(NULL, ", ");
+			if (pos >= F2FS_MAX_EXTENSION)
+				break;
+		}
+
+		if (i == 0)
+			set_sb(extension_count, pos);
+		else
+			sb->hot_ext_count = pos - get_sb(extension_count);
+
+		free(c.extension_list[i]);
 	}
-
-	set_sb(extension_count, i);
-
-	free(c.extension_list);
 }
 
 static void verify_cur_segs(void)
@@ -151,7 +172,7 @@ static int f2fs_prepare_super_block(void)
 	u_int32_t log_sectorsize, log_sectors_per_block;
 	u_int32_t log_blocksize, log_blks_per_seg;
 	u_int32_t segment_size_bytes, zone_size_bytes;
-	u_int32_t sit_segments;
+	u_int32_t sit_segments, nat_segments;
 	u_int32_t blocks_for_sit, blocks_for_nat, blocks_for_ssa;
 	u_int32_t total_valid_blks_available;
 	u_int64_t zone_align_start_offset, diff;
@@ -159,7 +180,6 @@ static int f2fs_prepare_super_block(void)
 	u_int32_t sit_bitmap_size, max_sit_bitmap_size;
 	u_int32_t max_nat_bitmap_size, max_nat_segments;
 	u_int32_t total_zones;
-	u_int32_t next_ino;
 	enum quota_type qtype;
 	int i;
 
@@ -272,7 +292,18 @@ static int f2fs_prepare_super_block(void)
 	blocks_for_nat = SIZE_ALIGN(total_valid_blks_available,
 			NAT_ENTRY_PER_BLOCK);
 
-	set_sb(segment_count_nat, SEG_ALIGN(blocks_for_nat));
+	if (c.large_nat_bitmap) {
+		nat_segments = SEG_ALIGN(blocks_for_nat) *
+						DEFAULT_NAT_ENTRY_RATIO / 100;
+		set_sb(segment_count_nat, nat_segments ? nat_segments : 1);
+		max_nat_bitmap_size = (get_sb(segment_count_nat) <<
+						log_blks_per_seg) / 8;
+		set_sb(segment_count_nat, get_sb(segment_count_nat) * 2);
+	} else {
+		set_sb(segment_count_nat, SEG_ALIGN(blocks_for_nat));
+		max_nat_bitmap_size = 0;
+	}
+
 	/*
 	 * The number of node segments should not be exceeded a "Threshold".
 	 * This number resizes NAT bitmap area in a CP page.
@@ -286,28 +317,40 @@ static int f2fs_prepare_super_block(void)
 	else
 		max_sit_bitmap_size = sit_bitmap_size;
 
-	/*
-	 * It should be reserved minimum 1 segment for nat.
-	 * When sit is too large, we should expand cp area. It requires more
-	 * pages for cp.
-	 */
-	if (max_sit_bitmap_size > MAX_SIT_BITMAP_SIZE_IN_CKPT) {
-		max_nat_bitmap_size = CHECKSUM_OFFSET -
-				sizeof(struct f2fs_checkpoint) + 1;
-		set_sb(cp_payload, F2FS_BLK_ALIGN(max_sit_bitmap_size));
+	if (c.large_nat_bitmap) {
+		/* use cp_payload if free space of f2fs_checkpoint is not enough */
+		if (max_sit_bitmap_size + max_nat_bitmap_size >
+						MAX_BITMAP_SIZE_IN_CKPT) {
+			u_int32_t diff =  max_sit_bitmap_size +
+						max_nat_bitmap_size -
+						MAX_BITMAP_SIZE_IN_CKPT;
+			set_sb(cp_payload, F2FS_BLK_ALIGN(diff));
+		} else {
+			set_sb(cp_payload, 0);
+		}
 	} else {
-		max_nat_bitmap_size =
-			CHECKSUM_OFFSET - sizeof(struct f2fs_checkpoint) + 1
-			- max_sit_bitmap_size;
-		set_sb(cp_payload, 0);
+		/*
+		 * It should be reserved minimum 1 segment for nat.
+		 * When sit is too large, we should expand cp area.
+		 * It requires more pages for cp.
+		 */
+		if (max_sit_bitmap_size > MAX_SIT_BITMAP_SIZE_IN_CKPT) {
+			max_nat_bitmap_size = CHECKSUM_OFFSET -
+					sizeof(struct f2fs_checkpoint) + 1;
+			set_sb(cp_payload, F2FS_BLK_ALIGN(max_sit_bitmap_size));
+	        } else {
+			max_nat_bitmap_size =
+				CHECKSUM_OFFSET - sizeof(struct f2fs_checkpoint) + 1
+				- max_sit_bitmap_size;
+			set_sb(cp_payload, 0);
+		}
+		max_nat_segments = (max_nat_bitmap_size * 8) >> log_blks_per_seg;
+
+		if (get_sb(segment_count_nat) > max_nat_segments)
+			set_sb(segment_count_nat, max_nat_segments);
+
+		set_sb(segment_count_nat, get_sb(segment_count_nat) * 2);
 	}
-
-	max_nat_segments = (max_nat_bitmap_size * 8) >> log_blks_per_seg;
-
-	if (get_sb(segment_count_nat) > max_nat_segments)
-		set_sb(segment_count_nat, max_nat_segments);
-
-	set_sb(segment_count_nat, get_sb(segment_count_nat) * 2);
 
 	set_sb(ssa_blkaddr, get_sb(nat_blkaddr) + get_sb(segment_count_nat) *
 			c.blks_per_seg);
@@ -388,7 +431,7 @@ static int f2fs_prepare_super_block(void)
 	set_sb(node_ino, 1);
 	set_sb(meta_ino, 2);
 	set_sb(root_ino, 3);
-	next_ino = 4;
+	c.next_free_nid = 4;
 
 	if (c.feature & cpu_to_le32(F2FS_FEATURE_QUOTA_INO)) {
 		quotatype_bits = QUOTA_USR_BIT | QUOTA_GRP_BIT;
@@ -399,10 +442,13 @@ static int f2fs_prepare_super_block(void)
 	for (qtype = 0; qtype < F2FS_MAX_QUOTAS; qtype++) {
 		if (!((1 << qtype) & quotatype_bits))
 			continue;
-		sb->qf_ino[qtype] = cpu_to_le32(next_ino++);
+		sb->qf_ino[qtype] = cpu_to_le32(c.next_free_nid++);
 		MSG(0, "Info: add quota type = %u => %u\n",
-					qtype, next_ino - 1);
+					qtype, c.next_free_nid - 1);
 	}
+
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_LOST_FOUND))
+		c.lpf_ino = c.next_free_nid++;
 
 	if (total_zones <= 6) {
 		MSG(1, "\tError: %d zones: Need more zones "
@@ -535,7 +581,6 @@ static int f2fs_write_check_point_pack(void)
 	char *sum_compact, *sum_compact_p;
 	struct f2fs_summary *sum_entry;
 	enum quota_type qtype;
-	u_int32_t quota_inum, quota_dnum;
 	int off;
 	int ret = -1;
 
@@ -587,16 +632,10 @@ static int f2fs_write_check_point_pack(void)
 		set_cp(cur_data_segno[i], 0xffffffff);
 	}
 
-	quota_inum = quota_dnum = 0;
-	for (qtype = 0; qtype < F2FS_MAX_QUOTAS; qtype++)
-		if (sb->qf_ino[qtype]) {
-			quota_inum++;
-			quota_dnum += QUOTA_DATA(qtype);
-		}
-
-	set_cp(cur_node_blkoff[0], 1 + quota_inum);
-	set_cp(cur_data_blkoff[0], 1 + quota_dnum);
-	set_cp(valid_block_count, 2 + quota_inum + quota_dnum);
+	set_cp(cur_node_blkoff[0], 1 + c.quota_inum + c.lpf_inum);
+	set_cp(cur_data_blkoff[0], 1 + c.quota_dnum + c.lpf_dnum);
+	set_cp(valid_block_count, 2 + c.quota_inum + c.quota_dnum +
+			c.lpf_inum + c.lpf_dnum);
 	set_cp(rsvd_segment_count, c.reserved_segments);
 	set_cp(overprov_segment_count, (get_sb(segment_count_main) -
 			get_cp(rsvd_segment_count)) *
@@ -623,11 +662,14 @@ static int f2fs_write_check_point_pack(void)
 	if (c.trimmed)
 		flags |= CP_TRIMMED_FLAG;
 
+	if (c.large_nat_bitmap)
+		flags |= CP_LARGE_NAT_BITMAP_FLAG;
+
 	set_cp(ckpt_flags, flags);
 	set_cp(cp_pack_start_sum, 1 + get_sb(cp_payload));
-	set_cp(valid_node_count, 1 + quota_inum);
-	set_cp(valid_inode_count, 1 + quota_inum);
-	set_cp(next_free_nid, get_sb(root_ino) + 1 + quota_inum);
+	set_cp(valid_node_count, 1 + c.quota_inum + c.lpf_inum);
+	set_cp(valid_inode_count, 1 + c.quota_inum + c.lpf_inum);
+	set_cp(next_free_nid, c.next_free_nid);
 	set_cp(sit_ver_bitmap_bytesize, ((get_sb(segment_count_sit) / 2) <<
 			get_sb(log_blocks_per_seg)) / 8);
 
@@ -685,7 +727,7 @@ static int f2fs_write_check_point_pack(void)
 	SET_SUM_TYPE((&sum->footer), SUM_TYPE_DATA);
 
 	journal = &sum->journal;
-	journal->n_nats = cpu_to_le16(1 + quota_inum);
+	journal->n_nats = cpu_to_le16(1 + c.quota_inum + c.lpf_inum);
 	journal->nat_j.entries[0].nid = sb->root_ino;
 	journal->nat_j.entries[0].ne.version = 0;
 	journal->nat_j.entries[0].ne.ino = sb->root_ino;
@@ -706,6 +748,16 @@ static int f2fs_write_check_point_pack(void)
 		i++;
 	}
 
+	if (c.lpf_inum) {
+		journal->nat_j.entries[i].nid = cpu_to_le32(c.lpf_ino);
+		journal->nat_j.entries[i].ne.version = 0;
+		journal->nat_j.entries[i].ne.ino = cpu_to_le32(c.lpf_ino);
+		journal->nat_j.entries[i].ne.block_addr = cpu_to_le32(
+				get_sb(main_blkaddr) +
+				get_cp(cur_node_segno[0]) *
+				c.blks_per_seg + i);
+	}
+
 	memcpy(sum_compact_p, &journal->n_nats, SUM_JOURNAL_SIZE);
 	sum_compact_p += SUM_JOURNAL_SIZE;
 
@@ -715,10 +767,13 @@ static int f2fs_write_check_point_pack(void)
 	journal->sit_j.entries[0].segno = cp->cur_node_segno[0];
 	journal->sit_j.entries[0].se.vblocks =
 				cpu_to_le16((CURSEG_HOT_NODE << 10) |
-						(1 + quota_inum));
+						(1 + c.quota_inum + c.lpf_inum));
 	f2fs_set_bit(0, (char *)journal->sit_j.entries[0].se.valid_map);
-	for (i = 1; i <= quota_inum; i++)
+	for (i = 1; i <= c.quota_inum; i++)
 		f2fs_set_bit(i, (char *)journal->sit_j.entries[0].se.valid_map);
+	if (c.lpf_inum)
+		f2fs_set_bit(i, (char *)journal->sit_j.entries[0].se.valid_map);
+
 	journal->sit_j.entries[1].segno = cp->cur_node_segno[1];
 	journal->sit_j.entries[1].se.vblocks =
 				cpu_to_le16((CURSEG_WARM_NODE << 10));
@@ -730,9 +785,11 @@ static int f2fs_write_check_point_pack(void)
 	journal->sit_j.entries[3].segno = cp->cur_data_segno[0];
 	journal->sit_j.entries[3].se.vblocks =
 				cpu_to_le16((CURSEG_HOT_DATA << 10) |
-						(1 + quota_dnum));
+						(1 + c.quota_dnum + c.lpf_dnum));
 	f2fs_set_bit(0, (char *)journal->sit_j.entries[3].se.valid_map);
-	for (i = 1; i <= quota_dnum; i++)
+	for (i = 1; i <= c.quota_dnum; i++)
+		f2fs_set_bit(i, (char *)journal->sit_j.entries[3].se.valid_map);
+	if (c.lpf_dnum)
 		f2fs_set_bit(i, (char *)journal->sit_j.entries[3].se.valid_map);
 
 	journal->sit_j.entries[4].segno = cp->cur_data_segno[1];
@@ -758,9 +815,14 @@ static int f2fs_write_check_point_pack(void)
 
 		for (j = 0; j < QUOTA_DATA(qtype); j++) {
 			(sum_entry + off + j)->nid = sb->qf_ino[qtype];
-			(sum_entry + off + j)->ofs_in_node = j;
+			(sum_entry + off + j)->ofs_in_node = cpu_to_le16(j);
 		}
 		off += QUOTA_DATA(qtype);
+	}
+
+	if (c.lpf_dnum) {
+		(sum_entry + off)->nid = cpu_to_le32(c.lpf_ino);
+		(sum_entry + off)->ofs_in_node = 0;
 	}
 
 	/* warm data summary, nothing to do */
@@ -786,6 +848,11 @@ static int f2fs_write_check_point_pack(void)
 		sum->entries[1 + i].nid = sb->qf_ino[qtype];
 		sum->entries[1 + i].ofs_in_node = 0;
 		i++;
+	}
+	if (c.lpf_inum) {
+		i++;
+		sum->entries[i].nid = cpu_to_le32(c.lpf_ino);
+		sum->entries[i].ofs_in_node = 0;
 	}
 
 	cp_seg_blk++;
@@ -925,31 +992,36 @@ static int f2fs_write_super_block(void)
 }
 
 #ifndef WITH_ANDROID
-static int discard_obsolete_dnode(struct f2fs_node *raw_node, u_int64_t offset)
+static int f2fs_discard_obsolete_dnode(void)
 {
-	u_int64_t next_blkaddr = 0;
+	struct f2fs_node *raw_node;
+	u_int64_t next_blkaddr = 0, offset;
 	u64 end_blkaddr = (get_sb(segment_count_main) <<
 			get_sb(log_blocks_per_seg)) + get_sb(main_blkaddr);
 	u_int64_t start_inode_pos = get_sb(main_blkaddr);
 	u_int64_t last_inode_pos;
-	enum quota_type qtype;
-	u_int32_t quota_inum = 0;
-
-	for (qtype = 0; qtype < F2FS_MAX_QUOTAS; qtype++)
-		if (sb->qf_ino[qtype]) quota_inum++;
-
-	/* only root inode was written before truncating dnodes */
-	last_inode_pos = start_inode_pos +
-		c.cur_seg[CURSEG_HOT_NODE] * c.blks_per_seg + quota_inum;
 
 	if (c.zoned_mode)
 		return 0;
+
+	raw_node = calloc(sizeof(struct f2fs_node), 1);
+	if (!raw_node)
+		return -1;
+
+	/* avoid power-off-recovery based on roll-forward policy */
+	offset = get_sb(main_blkaddr);
+	offset += c.cur_seg[CURSEG_WARM_NODE] * c.blks_per_seg;
+
+	last_inode_pos = start_inode_pos +
+		c.cur_seg[CURSEG_HOT_NODE] * c.blks_per_seg + c.quota_inum + c.lpf_inum;
+
 	do {
 		if (offset < get_sb(main_blkaddr) || offset >= end_blkaddr)
 			break;
 
 		if (dev_read_block(raw_node, offset)) {
 			MSG(1, "\tError: While traversing direct node!!!\n");
+			free(raw_node);
 			return -1;
 		}
 
@@ -959,6 +1031,7 @@ static int discard_obsolete_dnode(struct f2fs_node *raw_node, u_int64_t offset)
 		DBG(1, "\tDiscard dnode, at offset 0x%08"PRIx64"\n", offset);
 		if (dev_write_block(raw_node, offset)) {
 			MSG(1, "\tError: While discarding direct node!!!\n");
+			free(raw_node);
 			return -1;
 		}
 		offset = next_blkaddr;
@@ -967,6 +1040,7 @@ static int discard_obsolete_dnode(struct f2fs_node *raw_node, u_int64_t offset)
 			break;
 	} while (1);
 
+	free(raw_node);
 	return 0;
 }
 #endif
@@ -992,7 +1066,10 @@ static int f2fs_write_root_inode(void)
 			c.blks_per_seg + 1);
 
 	raw_node->i.i_mode = cpu_to_le16(0x41ed);
-	raw_node->i.i_links = cpu_to_le32(2);
+	if (c.lpf_ino)
+		raw_node->i.i_links = cpu_to_le32(3);
+	else
+		raw_node->i.i_links = cpu_to_le32(2);
 	raw_node->i.i_uid = cpu_to_le32(getuid());
 	raw_node->i.i_gid = cpu_to_le32(getgid());
 
@@ -1052,17 +1129,6 @@ static int f2fs_write_root_inode(void)
 		return -1;
 	}
 
-	/* avoid power-off-recovery based on roll-forward policy */
-	main_area_node_seg_blk_offset = get_sb(main_blkaddr);
-	main_area_node_seg_blk_offset += c.cur_seg[CURSEG_WARM_NODE] *
-					c.blks_per_seg;
-
-#ifndef WITH_ANDROID
-	if (discard_obsolete_dnode(raw_node, main_area_node_seg_blk_offset)) {
-		free(raw_node);
-		return -1;
-	}
-#endif
 	free(raw_node);
 	return 0;
 }
@@ -1109,10 +1175,16 @@ static int f2fs_write_default_quota(int qtype, unsigned int blkaddr,
 	dqblk.dqb_pad = cpu_to_le32(0);
 	dqblk.dqb_ihardlimit = cpu_to_le64(0);
 	dqblk.dqb_isoftlimit = cpu_to_le64(0);
-	dqblk.dqb_curinodes = cpu_to_le64(1);
+	if (c.lpf_ino)
+		dqblk.dqb_curinodes = cpu_to_le64(2);
+	else
+		dqblk.dqb_curinodes = cpu_to_le64(1);
 	dqblk.dqb_bhardlimit = cpu_to_le64(0);
 	dqblk.dqb_bsoftlimit = cpu_to_le64(0);
-	dqblk.dqb_curspace = cpu_to_le64(4096);
+	if (c.lpf_ino)
+		dqblk.dqb_curspace = cpu_to_le64(8192);
+	else
+		dqblk.dqb_curspace = cpu_to_le64(4096);
 	dqblk.dqb_btime = cpu_to_le64(0);
 	dqblk.dqb_itime = cpu_to_le64(0);
 
@@ -1128,6 +1200,7 @@ static int f2fs_write_default_quota(int qtype, unsigned int blkaddr,
 	DBG(1, "\tWriting quota data, at offset %08x, %08x\n",
 					blkaddr, blkaddr + 1);
 	free(filebuf);
+	c.quota_dnum += QUOTA_DATA(qtype);
 	return 0;
 }
 
@@ -1229,6 +1302,7 @@ static int f2fs_write_qf_inode(int qtype)
 	}
 
 	free(raw_node);
+	c.quota_inum++;
 	return 0;
 }
 
@@ -1285,6 +1359,142 @@ static int f2fs_update_nat_root(void)
 	return 0;
 }
 
+static block_t f2fs_add_default_dentry_lpf(void)
+{
+	struct f2fs_dentry_block *dent_blk;
+	uint64_t data_blk_offset;
+
+	dent_blk = calloc(F2FS_BLKSIZE, 1);
+	if (dent_blk == NULL) {
+		MSG(1, "\tError: Calloc Failed for dent_blk!!!\n");
+		return 0;
+	}
+
+	dent_blk->dentry[0].hash_code = 0;
+	dent_blk->dentry[0].ino = cpu_to_le32(c.lpf_ino);
+	dent_blk->dentry[0].name_len = cpu_to_le16(1);
+	dent_blk->dentry[0].file_type = F2FS_FT_DIR;
+	memcpy(dent_blk->filename[0], ".", 1);
+
+	dent_blk->dentry[1].hash_code = 0;
+	dent_blk->dentry[1].ino = sb->root_ino;
+	dent_blk->dentry[1].name_len = cpu_to_le16(2);
+	dent_blk->dentry[1].file_type = F2FS_FT_DIR;
+	memcpy(dent_blk->filename[1], "..", 2);
+
+	test_and_set_bit_le(0, dent_blk->dentry_bitmap);
+	test_and_set_bit_le(1, dent_blk->dentry_bitmap);
+
+	data_blk_offset = get_sb(main_blkaddr);
+	data_blk_offset += c.cur_seg[CURSEG_HOT_DATA] * c.blks_per_seg +
+		1 + c.quota_dnum;
+
+	DBG(1, "\tWriting default dentry lost+found, at offset 0x%08"PRIx64"\n",
+			data_blk_offset);
+	if (dev_write_block(dent_blk, data_blk_offset)) {
+		MSG(1, "\tError While writing the dentry_blk to disk!!!\n");
+		free(dent_blk);
+		return 0;
+	}
+
+	free(dent_blk);
+	c.lpf_dnum++;
+	return data_blk_offset;
+}
+
+static int f2fs_write_lpf_inode(void)
+{
+	struct f2fs_node *raw_node;
+	u_int64_t blk_size_bytes, main_area_node_seg_blk_offset;
+	block_t data_blk_nor;
+	int err = 0;
+
+	ASSERT(c.lpf_ino);
+
+	raw_node = calloc(F2FS_BLKSIZE, 1);
+	if (raw_node == NULL) {
+		MSG(1, "\tError: Calloc Failed for raw_node!!!\n");
+		return -1;
+	}
+
+	raw_node->footer.nid = cpu_to_le32(c.lpf_ino);
+	raw_node->footer.ino = raw_node->footer.nid;
+	raw_node->footer.cp_ver = cpu_to_le64(1);
+	raw_node->footer.next_blkaddr = cpu_to_le32(
+			get_sb(main_blkaddr) +
+			c.cur_seg[CURSEG_HOT_NODE] * c.blks_per_seg +
+			1 + c.quota_inum + 1);
+
+	raw_node->i.i_mode = cpu_to_le16(0x41c0); /* 0700 */
+	raw_node->i.i_links = cpu_to_le32(2);
+	raw_node->i.i_uid = cpu_to_le32(getuid());
+	raw_node->i.i_gid = cpu_to_le32(getgid());
+
+	blk_size_bytes = 1 << get_sb(log_blocksize);
+	raw_node->i.i_size = cpu_to_le64(1 * blk_size_bytes);
+	raw_node->i.i_blocks = cpu_to_le64(2);
+
+	raw_node->i.i_atime = cpu_to_le32(time(NULL));
+	raw_node->i.i_atime_nsec = 0;
+	raw_node->i.i_ctime = cpu_to_le32(time(NULL));
+	raw_node->i.i_ctime_nsec = 0;
+	raw_node->i.i_mtime = cpu_to_le32(time(NULL));
+	raw_node->i.i_mtime_nsec = 0;
+	raw_node->i.i_generation = 0;
+	raw_node->i.i_xattr_nid = 0;
+	raw_node->i.i_flags = 0;
+	raw_node->i.i_pino = le32_to_cpu(sb->root_ino);
+	raw_node->i.i_namelen = le32_to_cpu(strlen(LPF));
+	memcpy(raw_node->i.i_name, LPF, strlen(LPF));
+	raw_node->i.i_current_depth = cpu_to_le32(1);
+	raw_node->i.i_dir_level = DEF_DIR_LEVEL;
+
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_EXTRA_ATTR)) {
+		raw_node->i.i_inline = F2FS_EXTRA_ATTR;
+		raw_node->i.i_extra_isize =
+			cpu_to_le16(F2FS_TOTAL_EXTRA_ATTR_SIZE);
+	}
+
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_PRJQUOTA))
+		raw_node->i.i_projid = cpu_to_le32(F2FS_DEF_PROJID);
+
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_INODE_CRTIME)) {
+		raw_node->i.i_crtime = cpu_to_le32(time(NULL));
+		raw_node->i.i_crtime_nsec = 0;
+	}
+
+	data_blk_nor = f2fs_add_default_dentry_lpf();
+	if (data_blk_nor == 0) {
+		MSG(1, "\tError: Failed to add default dentries for lost+found!!!\n");
+		err = -1;
+		goto exit;
+	}
+	raw_node->i.i_addr[get_extra_isize(raw_node)] = cpu_to_le32(data_blk_nor);
+
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_INODE_CHKSUM))
+		raw_node->i.i_inode_checksum =
+			cpu_to_le32(f2fs_inode_chksum(raw_node));
+
+	main_area_node_seg_blk_offset = get_sb(main_blkaddr);
+	main_area_node_seg_blk_offset += c.cur_seg[CURSEG_HOT_NODE] *
+		c.blks_per_seg + c.quota_inum + 1;
+
+	DBG(1, "\tWriting lost+found inode (hot node), %x %x %x at offset 0x%08"PRIu64"\n",
+			get_sb(main_blkaddr),
+			c.cur_seg[CURSEG_HOT_NODE],
+			c.blks_per_seg, main_area_node_seg_blk_offset);
+	if (dev_write_block(raw_node, main_area_node_seg_blk_offset)) {
+		MSG(1, "\tError: While writing the raw_node to disk!!!\n");
+		err = -1;
+		goto exit;
+	}
+
+	c.lpf_inum++;
+exit:
+	free(raw_node);
+	return err;
+}
+
 static int f2fs_add_default_dentry_root(void)
 {
 	struct f2fs_dentry_block *dent_blk = NULL;
@@ -1311,6 +1521,23 @@ static int f2fs_add_default_dentry_root(void)
 	/* bitmap for . and .. */
 	test_and_set_bit_le(0, dent_blk->dentry_bitmap);
 	test_and_set_bit_le(1, dent_blk->dentry_bitmap);
+
+	if (c.lpf_ino) {
+		int len = strlen(LPF);
+		f2fs_hash_t hash = f2fs_dentry_hash((unsigned char *)LPF, len);
+
+		dent_blk->dentry[2].hash_code = cpu_to_le32(hash);
+		dent_blk->dentry[2].ino = cpu_to_le32(c.lpf_ino);
+		dent_blk->dentry[2].name_len = cpu_to_le16(len);
+		dent_blk->dentry[2].file_type = F2FS_FT_DIR;
+		memcpy(dent_blk->filename[2], LPF, F2FS_SLOT_LEN);
+
+		memcpy(dent_blk->filename[3], LPF + F2FS_SLOT_LEN,
+				len - F2FS_SLOT_LEN);
+
+		test_and_set_bit_le(2, dent_blk->dentry_bitmap);
+		test_and_set_bit_le(3, dent_blk->dentry_bitmap);
+	}
 
 	data_blk_offset = get_sb(main_blkaddr);
 	data_blk_offset += c.cur_seg[CURSEG_HOT_DATA] *
@@ -1348,6 +1575,22 @@ static int f2fs_create_root_dir(void)
 			goto exit;
 		}
 	}
+
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_LOST_FOUND)) {
+		err = f2fs_write_lpf_inode();
+		if (err < 0) {
+			MSG(1, "\tError: Failed to write lost+found inode!!!\n");
+			goto exit;
+		}
+	}
+
+#ifndef WITH_ANDROID
+	err = f2fs_discard_obsolete_dnode();
+	if (err < 0) {
+		MSG(1, "\tError: Failed to discard obsolete dnode!!!\n");
+		goto exit;
+	}
+#endif
 
 	err = f2fs_update_nat_root();
 	if (err < 0) {
