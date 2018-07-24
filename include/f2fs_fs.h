@@ -291,6 +291,8 @@ static inline uint64_t bswap_64(uint64_t val)
 
 #define VERSION_LEN	256
 
+#define LPF "lost+found"
+
 enum f2fs_config_func {
 	MKFS,
 	FSCK,
@@ -348,7 +350,7 @@ struct f2fs_configuration {
 	int32_t dump_fd;
 	struct device_info devices[MAX_DEVICES];
 	int ndevs;
-	char *extension_list;
+	char *extension_list[2];
 	const char *rootdev_name;
 	int dbg_lv;
 	int show_dentry;
@@ -363,7 +365,16 @@ struct f2fs_configuration {
 	int preen_mode;
 	int ro;
 	int preserve_limits;		/* preserve quota limits */
+	int large_nat_bitmap;
 	__le32 feature;			/* defined features */
+
+	/* mkfs parameters */
+	u_int32_t next_free_nid;
+	u_int32_t quota_inum;
+	u_int32_t quota_dnum;
+	u_int32_t lpf_inum;
+	u_int32_t lpf_dnum;
+	u_int32_t lpf_ino;
 
 	/* defragmentation parameters */
 	int defrag_shrink;
@@ -552,6 +563,7 @@ enum {
 #define F2FS_FEATURE_FLEXIBLE_INLINE_XATTR	0x0040
 #define F2FS_FEATURE_QUOTA_INO		0x0080
 #define F2FS_FEATURE_INODE_CRTIME	0x0100
+#define F2FS_FEATURE_LOST_FOUND		0x0200
 #define F2FS_FEATURE_VERITY		0x0400	/* reserved */
 
 #define MAX_VOLUME_NAME		512
@@ -605,12 +617,14 @@ struct f2fs_super_block {
 	__u8 encrypt_pw_salt[16];	/* Salt used for string2key algorithm */
 	struct f2fs_device devs[MAX_DEVICES];	/* device list */
 	__le32 qf_ino[F2FS_MAX_QUOTAS];	/* quota inode numbers */
-	__u8 reserved[315];		/* valid reserved region */
+	__u8 hot_ext_count;		/* # of hot file extension */
+	__u8 reserved[314];		/* valid reserved region */
 } __attribute__((packed));
 
 /*
  * For checkpoint
  */
+#define CP_LARGE_NAT_BITMAP_FLAG	0x00000400
 #define CP_NOCRC_RECOVERY_FLAG	0x00000200
 #define CP_TRIMMED_FLAG		0x00000100
 #define CP_NAT_BITS_FLAG	0x00000080
@@ -653,8 +667,10 @@ struct f2fs_checkpoint {
 	unsigned char sit_nat_version_bitmap[1];
 } __attribute__((packed));
 
-#define MAX_SIT_BITMAP_SIZE_IN_CKPT	\
+#define MAX_SIT_BITMAP_SIZE_IN_CKPT    \
 	(CHECKSUM_OFFSET - sizeof(struct f2fs_checkpoint) + 1 - 64)
+#define MAX_BITMAP_SIZE_IN_CKPT	\
+	(CHECKSUM_OFFSET - sizeof(struct f2fs_checkpoint) + 1)
 
 /*
  * For orphan inode management
@@ -825,6 +841,8 @@ struct f2fs_node {
  */
 #define NAT_ENTRY_PER_BLOCK (PAGE_CACHE_SIZE / sizeof(struct f2fs_nat_entry))
 #define NAT_BLOCK_OFFSET(start_nid) (start_nid / NAT_ENTRY_PER_BLOCK)
+
+#define DEFAULT_NAT_ENTRY_RATIO		20
 
 struct f2fs_nat_entry {
 	__u8 version;		/* latest version of cached nat entry */
