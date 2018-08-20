@@ -5,7 +5,7 @@ ifeq ($(HOST_OS),linux)
 
 # The versions depend on $(LOCAL_PATH)/VERSION
 version_CFLAGS := -DF2FS_MAJOR_VERSION=1 -DF2FS_MINOR_VERSION=8 -DF2FS_TOOLS_VERSION=\"1.8.0\" -DF2FS_TOOLS_DATE=\"2017-02-03\"
-common_CFLAGS := -DWITH_ANDROID $(version_CFLAGS)
+common_CFLAGS := -DWITH_ANDROID -DWITH_BLKDISCARD $(version_CFLAGS)
 # Workaround for the <sys/types.h>/<sys/sysmacros.h> split, here now for
 # bionic and coming later for glibc.
 target_CFLAGS := $(common_CFLAGS) -include sys/sysmacros.h
@@ -18,6 +18,7 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := libf2fs_fmt
 LOCAL_SRC_FILES := \
 	lib/libf2fs.c \
+	lib/libf2fs_zoned.c \
 	mkfs/f2fs_format.c \
 	mkfs/f2fs_format_utils.c \
 
@@ -31,6 +32,7 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := libf2fs_fmt_host
 LOCAL_SRC_FILES := \
 	lib/libf2fs.c \
+	lib/libf2fs_zoned.c \
 	mkfs/f2fs_format.c \
 	mkfs/f2fs_format_utils.c \
 
@@ -44,6 +46,7 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := libf2fs_fmt_host_dyn
 LOCAL_SRC_FILES := \
 	lib/libf2fs.c \
+	lib/libf2fs_zoned.c \
 	lib/libf2fs_io.c \
 	mkfs/f2fs_format.c \
 	mkfs/f2fs_format_utils.c \
