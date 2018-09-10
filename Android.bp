@@ -35,10 +35,12 @@ cc_defaults {
 
 cc_defaults {
     name: "libf2fs_src_files",
+    cflags: ["-DWITH_BLKDISCARD"],
     srcs: [
         "lib/libf2fs.c",
         "mkfs/f2fs_format.c",
         "mkfs/f2fs_format_utils.c",
+        "lib/libf2fs_zoned.c",
     ],
 }
 
