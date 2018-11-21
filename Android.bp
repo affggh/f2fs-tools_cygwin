@@ -5,8 +5,8 @@ cc_defaults {
     cflags: [
         "-DF2FS_MAJOR_VERSION=1",
         "-DF2FS_MINOR_VERSION=11",
-        "-DF2FS_TOOLS_VERSION=\"1.11.0\"",
-        "-DF2FS_TOOLS_DATE=\"2018-07-10\"",
+        "-DF2FS_TOOLS_VERSION=\"1.12.0\"",
+        "-DF2FS_TOOLS_DATE=\"2018-11-12\"",
         "-DWITH_ANDROID",
         "-Wall",
         "-Werror",

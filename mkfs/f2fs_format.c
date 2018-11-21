@@ -43,6 +43,9 @@ const char *media_ext_lists[] = {
 	"png",
 	"avi",
 	"divx",
+	"m4a",
+	"m4v",
+	"m4p",
 	"mp4",
 	"mp3",
 	"3gp",
@@ -56,15 +59,19 @@ const char *media_ext_lists[] = {
 	"wmx",
 	"svi",
 	"wvx",
+	"wv",
 	"wm",
 	"mpg",
 	"mpe",
 	"rm",
 	"ogg",
+	"opus",
+	"flac",
 	"jpeg",
 	"video",
 	"apk",	/* for android system */
 	"so",	/* for android system */
+	"exe",
 	NULL
 };
 
@@ -212,18 +219,18 @@ static int f2fs_prepare_super_block(void)
 	set_sb(block_count, c.total_sectors >> log_sectors_per_block);
 
 	zone_align_start_offset =
-		(c.start_sector * c.sector_size +
+		((u_int64_t) c.start_sector * DEFAULT_SECTOR_SIZE +
 		2 * F2FS_BLKSIZE + zone_size_bytes - 1) /
 		zone_size_bytes * zone_size_bytes -
-		c.start_sector * c.sector_size;
+		(u_int64_t) c.start_sector * DEFAULT_SECTOR_SIZE;
 
-	if (c.start_sector % c.sectors_per_blk) {
+	if (c.start_sector % DEFAULT_SECTORS_PER_BLOCK) {
 		MSG(1, "\t%s: Align start sector number to the page unit\n",
 				c.zoned_mode ? "FAIL" : "WARN");
 		MSG(1, "\ti.e., start sector: %d, ofs:%d (sects/page: %d)\n",
 				c.start_sector,
-				c.start_sector % c.sectors_per_blk,
-				c.sectors_per_blk);
+				c.start_sector % DEFAULT_SECTORS_PER_BLOCK,
+				DEFAULT_SECTORS_PER_BLOCK);
 		if (c.zoned_mode)
 			return -1;
 	}
@@ -235,7 +242,7 @@ static int f2fs_prepare_super_block(void)
 					get_sb(segment0_blkaddr));
 
 	if (c.zoned_mode && (get_sb(segment0_blkaddr) + c.start_sector /
-					c.sectors_per_blk) % c.zone_blocks) {
+					DEFAULT_SECTORS_PER_BLOCK) % c.zone_blocks) {
 		MSG(1, "\tError: Unaligned segment0 block address %u\n",
 				get_sb(segment0_blkaddr));
 		return -1;
@@ -335,12 +342,12 @@ static int f2fs_prepare_super_block(void)
 		 * It requires more pages for cp.
 		 */
 		if (max_sit_bitmap_size > MAX_SIT_BITMAP_SIZE_IN_CKPT) {
-			max_nat_bitmap_size = CHECKSUM_OFFSET -
+			max_nat_bitmap_size = CP_CHKSUM_OFFSET -
 					sizeof(struct f2fs_checkpoint) + 1;
 			set_sb(cp_payload, F2FS_BLK_ALIGN(max_sit_bitmap_size));
 	        } else {
 			max_nat_bitmap_size =
-				CHECKSUM_OFFSET - sizeof(struct f2fs_checkpoint) + 1
+				CP_CHKSUM_OFFSET - sizeof(struct f2fs_checkpoint) + 1
 				- max_sit_bitmap_size;
 			set_sb(cp_payload, 0);
 		}
@@ -408,17 +415,18 @@ static int f2fs_prepare_super_block(void)
 	if (c.overprovision == 0)
 		c.overprovision = get_best_overprovision(sb);
 
+	c.reserved_segments =
+			(2 * (100 / c.overprovision + 1) + NR_CURSEG_TYPE)
+			* c.segs_per_sec;
+
 	if (c.overprovision == 0 || c.total_segments < F2FS_MIN_SEGMENTS ||
 		(c.devices[0].total_sectors *
 			c.sector_size < zone_align_start_offset) ||
-		(get_sb(segment_count_main) - 2) < c.reserved_segments) {
+		(get_sb(segment_count_main) - NR_CURSEG_TYPE) <
+						c.reserved_segments) {
 		MSG(0, "\tError: Device size is not sufficient for F2FS volume\n");
 		return -1;
 	}
-
-	c.reserved_segments =
-			(2 * (100 / c.overprovision + 1) + 6)
-			* c.segs_per_sec;
 
 	uuid_generate(sb->uuid);
 
@@ -471,7 +479,7 @@ static int f2fs_prepare_super_block(void)
 		c.cur_seg[CURSEG_HOT_DATA] = next_zone(CURSEG_COLD_NODE);
 		c.cur_seg[CURSEG_COLD_DATA] =
 				max(last_zone((total_zones >> 2)),
-					next_zone(CURSEG_COLD_NODE));
+					next_zone(CURSEG_HOT_DATA));
 		c.cur_seg[CURSEG_WARM_DATA] =
 				max(last_zone((total_zones >> 1)),
 					next_zone(CURSEG_COLD_DATA));
@@ -495,6 +503,14 @@ static int f2fs_prepare_super_block(void)
 	memcpy(sb->init_version, c.version, VERSION_LEN);
 
 	sb->feature = c.feature;
+
+	if (get_sb(feature) & F2FS_FEATURE_SB_CHKSUM) {
+		set_sb(checksum_offset, SB_CHKSUM_OFFSET);
+		set_sb(crc, f2fs_cal_crc32(F2FS_SUPER_MAGIC, sb,
+						SB_CHKSUM_OFFSET));
+		MSG(1, "Info: SB CRC is set: offset (%d), crc (0x%x)\n",
+					get_sb(checksum_offset), get_sb(crc));
+	}
 
 	return 0;
 }
@@ -586,19 +602,19 @@ static int f2fs_write_check_point_pack(void)
 
 	cp = calloc(F2FS_BLKSIZE, 1);
 	if (cp == NULL) {
-		MSG(1, "\tError: Calloc Failed for f2fs_checkpoint!!!\n");
+		MSG(1, "\tError: Calloc failed for f2fs_checkpoint!!!\n");
 		return ret;
 	}
 
 	sum = calloc(F2FS_BLKSIZE, 1);
 	if (sum == NULL) {
-		MSG(1, "\tError: Calloc Failed for summay_node!!!\n");
+		MSG(1, "\tError: Calloc failed for summary_node!!!\n");
 		goto free_cp;
 	}
 
 	sum_compact = calloc(F2FS_BLKSIZE, 1);
 	if (sum_compact == NULL) {
-		MSG(1, "\tError: Calloc Failed for summay buffer!!!\n");
+		MSG(1, "\tError: Calloc failed for summary buffer!!!\n");
 		goto free_sum;
 	}
 	sum_compact_p = sum_compact;
@@ -608,13 +624,13 @@ static int f2fs_write_check_point_pack(void)
 						F2FS_BLKSIZE - 1);
 	nat_bits = calloc(F2FS_BLKSIZE, nat_bits_blocks);
 	if (nat_bits == NULL) {
-		MSG(1, "\tError: Calloc Failed for nat bits buffer!!!\n");
+		MSG(1, "\tError: Calloc failed for nat bits buffer!!!\n");
 		goto free_sum_compact;
 	}
 
 	cp_payload = calloc(F2FS_BLKSIZE, 1);
 	if (cp_payload == NULL) {
-		MSG(1, "\tError: Calloc Failed for cp_payload!!!\n");
+		MSG(1, "\tError: Calloc failed for cp_payload!!!\n");
 		goto free_nat_bits;
 	}
 
@@ -676,10 +692,10 @@ static int f2fs_write_check_point_pack(void)
 	set_cp(nat_ver_bitmap_bytesize, ((get_sb(segment_count_nat) / 2) <<
 			 get_sb(log_blocks_per_seg)) / 8);
 
-	set_cp(checksum_offset, CHECKSUM_OFFSET);
+	set_cp(checksum_offset, CP_CHKSUM_OFFSET);
 
-	crc = f2fs_cal_crc32(F2FS_SUPER_MAGIC, cp, CHECKSUM_OFFSET);
-	*((__le32 *)((unsigned char *)cp + CHECKSUM_OFFSET)) =
+	crc = f2fs_cal_crc32(F2FS_SUPER_MAGIC, cp, CP_CHKSUM_OFFSET);
+	*((__le32 *)((unsigned char *)cp + CP_CHKSUM_OFFSET)) =
 							cpu_to_le32(crc);
 
 	blk_size_bytes = 1 << get_sb(log_blocksize);
@@ -920,12 +936,12 @@ static int f2fs_write_check_point_pack(void)
 	}
 
 	/* cp page 1 of check point pack 2
-	 * Initiatialize other checkpoint pack with version zero
+	 * Initialize other checkpoint pack with version zero
 	 */
 	cp->checkpoint_ver = 0;
 
-	crc = f2fs_cal_crc32(F2FS_SUPER_MAGIC, cp, CHECKSUM_OFFSET);
-	*((__le32 *)((unsigned char *)cp + CHECKSUM_OFFSET)) =
+	crc = f2fs_cal_crc32(F2FS_SUPER_MAGIC, cp, CP_CHKSUM_OFFSET);
+	*((__le32 *)((unsigned char *)cp + CP_CHKSUM_OFFSET)) =
 							cpu_to_le32(crc);
 	cp_seg_blk = get_sb(segment0_blkaddr) + c.blks_per_seg;
 	DBG(1, "\tWriting cp page 1 of checkpoint pack 2, at offset 0x%08"PRIx64"\n",
@@ -975,12 +991,16 @@ static int f2fs_write_super_block(void)
 	u_int8_t *zero_buff;
 
 	zero_buff = calloc(F2FS_BLKSIZE, 1);
+	if (zero_buff == NULL) {
+		MSG(1, "\tError: Calloc Failed for super_blk_zero_buf!!!\n");
+		return -1;
+	}
 
 	memcpy(zero_buff + F2FS_SUPER_OFFSET, sb, sizeof(*sb));
 	DBG(1, "\tWriting super block, at offset 0x%08x\n", 0);
 	for (index = 0; index < 2; index++) {
 		if (dev_write_block(zero_buff, index)) {
-			MSG(1, "\tError: While while writing supe_blk "
+			MSG(1, "\tError: While while writing super_blk "
 					"on disk!!! index : %d\n", index);
 			free(zero_buff);
 			return -1;
@@ -1005,8 +1025,10 @@ static int f2fs_discard_obsolete_dnode(void)
 		return 0;
 
 	raw_node = calloc(sizeof(struct f2fs_node), 1);
-	if (!raw_node)
+	if (raw_node == NULL) {
+		MSG(1, "\tError: Calloc Failed for discard_raw_node!!!\n");
 		return -1;
+	}
 
 	/* avoid power-off-recovery based on roll-forward policy */
 	offset = get_sb(main_blkaddr);
@@ -1070,8 +1092,8 @@ static int f2fs_write_root_inode(void)
 		raw_node->i.i_links = cpu_to_le32(3);
 	else
 		raw_node->i.i_links = cpu_to_le32(2);
-	raw_node->i.i_uid = cpu_to_le32(getuid());
-	raw_node->i.i_gid = cpu_to_le32(getgid());
+	raw_node->i.i_uid = cpu_to_le32(c.root_uid);
+	raw_node->i.i_gid = cpu_to_le32(c.root_gid);
 
 	blk_size_bytes = 1 << get_sb(log_blocksize);
 	raw_node->i.i_size = cpu_to_le64(1 * blk_size_bytes); /* dentry */
@@ -1228,8 +1250,8 @@ static int f2fs_write_qf_inode(int qtype)
 
 	raw_node->i.i_mode = cpu_to_le16(0x8180);
 	raw_node->i.i_links = cpu_to_le32(1);
-	raw_node->i.i_uid = cpu_to_le32(getuid());
-	raw_node->i.i_gid = cpu_to_le32(getgid());
+	raw_node->i.i_uid = cpu_to_le32(c.root_uid);
+	raw_node->i.i_gid = cpu_to_le32(c.root_gid);
 
 	raw_node->i.i_size = cpu_to_le64(1024 * 6); /* Hard coded */
 	raw_node->i.i_blocks = cpu_to_le64(1 + QUOTA_DATA(qtype));
@@ -1243,7 +1265,7 @@ static int f2fs_write_qf_inode(int qtype)
 	raw_node->i.i_generation = 0;
 	raw_node->i.i_xattr_nid = 0;
 	raw_node->i.i_flags = FS_IMMUTABLE_FL;
-	raw_node->i.i_current_depth = cpu_to_le32(1);
+	raw_node->i.i_current_depth = cpu_to_le32(0);
 	raw_node->i.i_dir_level = DEF_DIR_LEVEL;
 
 	if (c.feature & cpu_to_le32(F2FS_FEATURE_EXTRA_ATTR)) {
@@ -1427,8 +1449,8 @@ static int f2fs_write_lpf_inode(void)
 
 	raw_node->i.i_mode = cpu_to_le16(0x41c0); /* 0700 */
 	raw_node->i.i_links = cpu_to_le32(2);
-	raw_node->i.i_uid = cpu_to_le32(getuid());
-	raw_node->i.i_gid = cpu_to_le32(getgid());
+	raw_node->i.i_uid = cpu_to_le32(c.root_uid);
+	raw_node->i.i_gid = cpu_to_le32(c.root_gid);
 
 	blk_size_bytes = 1 << get_sb(log_blocksize);
 	raw_node->i.i_size = cpu_to_le64(1 * blk_size_bytes);
@@ -1630,13 +1652,13 @@ int f2fs_format_device(void)
 
 	err = f2fs_init_sit_area();
 	if (err < 0) {
-		MSG(0, "\tError: Failed to Initialise the SIT AREA!!!\n");
+		MSG(0, "\tError: Failed to initialise the SIT AREA!!!\n");
 		goto exit;
 	}
 
 	err = f2fs_init_nat_area();
 	if (err < 0) {
-		MSG(0, "\tError: Failed to Initialise the NAT AREA!!!\n");
+		MSG(0, "\tError: Failed to initialise the NAT AREA!!!\n");
 		goto exit;
 	}
 
@@ -1654,7 +1676,7 @@ int f2fs_format_device(void)
 
 	err = f2fs_write_super_block();
 	if (err < 0) {
-		MSG(0, "\tError: Failed to write the Super Block!!!\n");
+		MSG(0, "\tError: Failed to write the super block!!!\n");
 		goto exit;
 	}
 exit:
