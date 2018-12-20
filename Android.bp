@@ -73,6 +73,7 @@ cc_defaults {
 
 cc_library_static {
     name: "libf2fs_fmt",
+    recovery_available: true,
     defaults: [
         "f2fs-tools-defaults",
         "libf2fs_src_files"
@@ -105,6 +106,7 @@ cc_binary {
         "make_f2fs_src_files",
     ],
     host_supported: true,
+    recovery_available: true,
     target: {
         android: {
             static_libs: [
@@ -157,6 +159,7 @@ cc_binary {
         "fsck_main_src_files",
     ],
     host_supported: true,
+    recovery_available: true,
     cflags: ["-DWITH_SLOAD"],
     srcs: ["fsck/fsck.c", "fsck/sload.c"],
     target: {
