@@ -339,7 +339,7 @@ out:
 	return ret;
 }
 
-static int __check_inode_mode(u32 nid, enum FILE_TYPE ftype, u32 mode)
+static int __check_inode_mode(u32 nid, enum FILE_TYPE ftype, u16 mode)
 {
 	if (ftype >= F2FS_FT_MAX)
 		return 0;
@@ -457,7 +457,7 @@ static int sanity_check_nid(struct f2fs_sb_info *sbi, u32 nid,
 		return 0;
 
 	if (ntype == TYPE_INODE &&
-		__check_inode_mode(nid, ftype, le32_to_cpu(node_blk->i.i_mode)))
+		__check_inode_mode(nid, ftype, le16_to_cpu(node_blk->i.i_mode)))
 		return -EINVAL;
 
 	/* workaround to fix later */
@@ -941,7 +941,13 @@ skip_blkcnt_fix:
 	}
 
 	i_gc_failures = le16_to_cpu(node_blk->i.i_gc_failures);
-	if (ftype == F2FS_FT_REG_FILE && i_gc_failures) {
+
+	/*
+	 * old kernel initialized i_gc_failures as 0x01, in preen mode 2,
+	 * let's skip repairing.
+	 */
+	if (ftype == F2FS_FT_REG_FILE && i_gc_failures &&
+		(c.preen_mode != PREEN_MODE_2 || i_gc_failures != 0x01)) {
 
 		DBG(1, "Regular Inode: 0x%x [%s] depth: %d\n\n",
 				le32_to_cpu(node_blk->footer.ino), en,
@@ -1420,6 +1426,8 @@ static int __chk_dentries(struct f2fs_sb_info *sbi, struct child_info *child,
 			continue;
 		}
 		name = calloc(name_len + 1, 1);
+		ASSERT(name);
+
 		memcpy(name, filenames[i], name_len);
 		slots = (name_len + F2FS_SLOT_LEN - 1) / F2FS_SLOT_LEN;
 
@@ -2668,7 +2676,7 @@ int fsck_verify(struct f2fs_sb_info *sbi)
 	if (force || (c.fix_on && !c.ro)) {
 		struct f2fs_checkpoint *cp = F2FS_CKPT(sbi);
 
-		if (force || c.bug_on) {
+		if (force || c.bug_on || c.bug_nat_bits) {
 			/* flush nats to write_nit_bits below */
 			flush_journal_entries(sbi);
 			fix_hard_links(sbi);

@@ -8,10 +8,10 @@ third_party {
     type: GIT
     value: "https://git.kernel.org/pub/scm/linux/kernel/git/jaegeuk/f2fs-tools.git"
   }
-  version: "8dac454d5ff79802fde9ff46f705f79fba2d8526"
+  version: "870817c410f63383a3c8c3bd6a3e045d6a158eae"
   last_upgrade_date {
-    year: 2018
-    month: 11
-    day: 22
+    year: 2019
+    month: 01
+    day: 15
   }
 }

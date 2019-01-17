@@ -277,6 +277,8 @@ static void dump_node_blk(struct f2fs_sb_info *sbi, int ntype,
 	get_node_info(sbi, nid, &ni);
 
 	node_blk = calloc(BLOCK_SZ, 1);
+	ASSERT(node_blk);
+
 	dev_read_block(node_blk, ni.blk_addr);
 
 	for (i = 0; i < idx; i++, (*ofs)++) {
@@ -407,7 +409,7 @@ static void dump_file(struct f2fs_sb_info *sbi, struct node_info *ni,
 				struct f2fs_node *node_blk, int force)
 {
 	struct f2fs_inode *inode = &node_blk->i;
-	u32 imode = le32_to_cpu(inode->i_mode);
+	u32 imode = le16_to_cpu(inode->i_mode);
 	u32 namelen = le32_to_cpu(inode->i_namelen);
 	char name[F2FS_NAME_LEN + 1] = {0};
 	char path[1024] = {0};
@@ -475,6 +477,8 @@ void dump_node(struct f2fs_sb_info *sbi, nid_t nid, int force)
 	get_node_info(sbi, nid, &ni);
 
 	node_blk = calloc(BLOCK_SZ, 1);
+	ASSERT(node_blk);
+
 	dev_read_block(node_blk, ni.blk_addr);
 
 	DBG(1, "Node ID               [0x%x]\n", nid);
