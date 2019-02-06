@@ -95,7 +95,7 @@ cc_library_host_static {
                 "-Wno-unused-parameter",
             ],
             enabled: true
-	},
+        },
     },
 }
 
@@ -120,7 +120,7 @@ cc_binary {
         },
         host: {
             static_libs: [
-	        "libf2fs_fmt_host",
+                "libf2fs_fmt_host",
                 "libext2_uuid",
                 "libsparse",
                 "libbase",
@@ -133,7 +133,7 @@ cc_binary {
             ldflags: ["-static"],
             host_ldlibs: ["-lws2_32"],
             enabled: true
-	},
+        },
     },
 }
 
@@ -144,12 +144,14 @@ cc_binary {
         "fsck_main_src_files",
     ],
     host_supported: true,
-    srcs: ["fsck/fsck.c"],
+    cflags: ["-DWITH_RESIZE", "-DWITH_DEFRAG"],
+    srcs: ["fsck/fsck.c", "fsck/resize.c", "fsck/defrag.c"],
     shared_libs: [
         "libext2_uuid",
         "libsparse",
         "libbase",
     ],
+    symlinks: ["resize.f2fs", "defrag.f2fs"],
 }
 
 cc_binary {
