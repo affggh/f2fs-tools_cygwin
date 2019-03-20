@@ -16,6 +16,7 @@ cc_defaults {
         "-Wno-pointer-arith",
         "-Wno-sign-compare",
         "-Wno-unused-function",
+        "-Wno-string-plus-int",
     ],
     local_include_dirs: [
         "include",
