@@ -9,6 +9,7 @@
  * published by the Free Software Foundation.
  */
 #include "fsck.h"
+#include "xattr.h"
 #include "quotaio.h"
 #include <time.h>
 
@@ -731,14 +732,40 @@ void fsck_chk_inode_blk(struct f2fs_sb_info *sbi, u32 nid,
 		if (c.feature & cpu_to_le32(F2FS_FEATURE_EXTRA_ATTR)) {
 			if (node_blk->i.i_extra_isize >
 				cpu_to_le16(F2FS_TOTAL_EXTRA_ATTR_SIZE)) {
+				FIX_MSG("ino[0x%x] recover i_extra_isize "
+					"from %u to %lu",
+					nid,
+					le16_to_cpu(node_blk->i.i_extra_isize),
+					F2FS_TOTAL_EXTRA_ATTR_SIZE);
 				node_blk->i.i_extra_isize =
 					cpu_to_le16(F2FS_TOTAL_EXTRA_ATTR_SIZE);
 				need_fix = 1;
 			}
 		} else {
+			FIX_MSG("ino[0x%x] remove F2FS_EXTRA_ATTR "
+				"flag in i_inline:%u",
+				nid, node_blk->i.i_inline);
 			/* we don't support tuning F2FS_FEATURE_EXTRA_ATTR now */
 			node_blk->i.i_inline &= ~F2FS_EXTRA_ATTR;
 			need_fix = 1;
+		}
+
+		if ((c.feature &
+			cpu_to_le32(F2FS_FEATURE_FLEXIBLE_INLINE_XATTR)) &&
+			(node_blk->i.i_inline & F2FS_INLINE_XATTR)) {
+			unsigned int inline_size =
+				le16_to_cpu(node_blk->i.i_inline_xattr_size);
+
+			if (!inline_size ||
+					inline_size > MAX_INLINE_XATTR_SIZE) {
+				FIX_MSG("ino[0x%x] recover inline xattr size "
+					"from %u to %u",
+					nid, inline_size,
+					DEFAULT_INLINE_XATTR_ADDRS);
+				node_blk->i.i_inline_xattr_size =
+					cpu_to_le16(DEFAULT_INLINE_XATTR_ADDRS);
+				need_fix = 1;
+			}
 		}
 	}
 	ofs = get_extra_isize(node_blk);
@@ -2007,6 +2034,8 @@ static void fix_checkpoint(struct f2fs_sb_info *sbi)
 		orphan_blks = __start_sum_addr(sbi) - 1;
 		flags |= CP_ORPHAN_PRESENT_FLAG;
 	}
+	if (is_set_ckpt_flags(cp, CP_TRIMMED_FLAG))
+		flags |= CP_TRIMMED_FLAG;
 	if (is_set_ckpt_flags(cp, CP_DISABLED_FLAG))
 		flags |= CP_DISABLED_FLAG;
 
