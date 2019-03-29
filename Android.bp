@@ -198,4 +198,58 @@ cc_binary {
     host_supported: false,
     cflags: ["--static"],
     srcs: ["tools/check_f2fs.c"],
+    product_specific: true,
+}
+
+cc_defaults {
+    name: "tools-defaults",
+    cflags: [
+        "-Wno-unused-function",
+    ],
+    local_include_dirs: [
+        "include",
+    ],
+    target: {
+        windows: {
+            enabled: false,
+        },
+        darwin: {
+            enabled: false,
+        },
+    },
+    product_specific: true,
+}
+
+cc_binary {
+    name: "f2fscrypt",
+    defaults: [
+        "tools-defaults",
+    ],
+    shared_libs: [
+        "libext2_uuid",
+    ],
+    srcs: [
+        "tools/f2fscrypt.c",
+        "tools/sha512.c",
+    ],
+}
+
+cc_binary {
+    name: "f2fsstat",
+    defaults: [
+        "tools-defaults",
+    ],
+    srcs: [
+        "tools/f2fstat.c",
+    ],
+}
+
+cc_binary {
+    name: "f2fs.fibmap",
+    defaults: [
+        "tools-defaults",
+    ],
+    srcs: [
+        "tools/fibmap.c",
+    ],
 }
