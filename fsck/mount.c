@@ -1066,11 +1066,29 @@ static int f2fs_init_nid_bitmap(struct f2fs_sb_info *sbi)
 			f2fs_set_bit(nid, nm_i->nid_bitmap);
 	}
 
+	if (nats_in_cursum(journal) > NAT_JOURNAL_ENTRIES) {
+		MSG(0, "\tError: f2fs_init_nid_bitmap truncate n_nats(%u) to "
+			"NAT_JOURNAL_ENTRIES(%lu)\n",
+			nats_in_cursum(journal), NAT_JOURNAL_ENTRIES);
+		journal->n_nats = cpu_to_le16(NAT_JOURNAL_ENTRIES);
+	}
+
 	for (i = 0; i < nats_in_cursum(journal); i++) {
 		block_t addr;
 
 		addr = le32_to_cpu(nat_in_journal(journal, i).block_addr);
+		if (!IS_VALID_BLK_ADDR(sbi, addr)) {
+			MSG(0, "\tError: f2fs_init_nid_bitmap: addr(%u) is invalid!!!\n", addr);
+			journal->n_nats = cpu_to_le16(i);
+			continue;
+		}
+
 		nid = le32_to_cpu(nid_in_journal(journal, i));
+		if (!IS_VALID_NID(sbi, nid)) {
+			MSG(0, "\tError: f2fs_init_nid_bitmap: nid(%u) is invalid!!!\n", nid);
+			journal->n_nats = cpu_to_le16(i);
+			continue;
+		}
 		if (addr != NULL_ADDR)
 			f2fs_set_bit(nid, nm_i->nid_bitmap);
 	}
@@ -1305,20 +1323,26 @@ int build_sit_info(struct f2fs_sb_info *sbi)
 	unsigned int bitmap_size;
 
 	sit_i = malloc(sizeof(struct sit_info));
-	if (!sit_i)
+	if (!sit_i) {
+		MSG(1, "\tError: Malloc failed for build_sit_info!\n");
 		return -ENOMEM;
+	}
 
 	SM_I(sbi)->sit_info = sit_i;
 
 	sit_i->sentries = calloc(TOTAL_SEGS(sbi) * sizeof(struct seg_entry), 1);
-	if (!sit_i->sentries)
-		return -ENOMEM;
+	if (!sit_i->sentries) {
+		MSG(1, "\tError: Calloc failed for build_sit_info!\n");
+		goto free_sit_info;
+	}
 
 	for (start = 0; start < TOTAL_SEGS(sbi); start++) {
 		sit_i->sentries[start].cur_valid_map
 			= calloc(SIT_VBLOCK_MAP_SIZE, 1);
-		if (!sit_i->sentries[start].cur_valid_map)
-			return -ENOMEM;
+		if (!sit_i->sentries[start].cur_valid_map) {
+			MSG(1, "\tError: Calloc failed for build_sit_info!!\n");
+			goto free_validity_maps;
+		}
 	}
 
 	sit_segs = get_sb(segment_count_sit) >> 1;
@@ -1326,8 +1350,10 @@ int build_sit_info(struct f2fs_sb_info *sbi)
 	src_bitmap = __bitmap_ptr(sbi, SIT_BITMAP);
 
 	dst_bitmap = malloc(bitmap_size);
-	if (!dst_bitmap)
-		return -ENOMEM;
+	if (!dst_bitmap) {
+		MSG(1, "\tError: Malloc failed for build_sit_info!!\n");
+		goto free_validity_maps;
+	}
 
 	memcpy(dst_bitmap, src_bitmap, bitmap_size);
 
@@ -1340,6 +1366,16 @@ int build_sit_info(struct f2fs_sb_info *sbi)
 	sit_i->sents_per_block = SIT_ENTRY_PER_BLOCK;
 	sit_i->elapsed_time = get_cp(elapsed_time);
 	return 0;
+
+free_validity_maps:
+	for (--start ; start >= 0; --start)
+		free(sit_i->sentries[start].cur_valid_map);
+	free(sit_i->sentries);
+
+free_sit_info:
+	free(sit_i);
+
+	return -ENOMEM;
 }
 
 void reset_curseg(struct f2fs_sb_info *sbi, int type)
@@ -1517,7 +1553,7 @@ static void restore_curseg_summaries(struct f2fs_sb_info *sbi)
 		read_normal_summaries(sbi, type);
 }
 
-static void build_curseg(struct f2fs_sb_info *sbi)
+static int build_curseg(struct f2fs_sb_info *sbi)
 {
 	struct f2fs_checkpoint *cp = F2FS_CKPT(sbi);
 	struct curseg_info *array;
@@ -1526,13 +1562,20 @@ static void build_curseg(struct f2fs_sb_info *sbi)
 	int i;
 
 	array = malloc(sizeof(*array) * NR_CURSEG_TYPE);
-	ASSERT(array);
+	if (!array) {
+		MSG(1, "\tError: Malloc failed for build_curseg!\n");
+		return -ENOMEM;
+	}
 
 	SM_I(sbi)->curseg_array = array;
 
 	for (i = 0; i < NR_CURSEG_TYPE; i++) {
 		array[i].sum_blk = malloc(PAGE_CACHE_SIZE);
-		ASSERT(array[i].sum_blk);
+		if (!array[i].sum_blk) {
+			MSG(1, "\tError: Malloc failed for build_curseg!!\n");
+			goto seg_cleanup;
+		}
+
 		if (i <= CURSEG_COLD_DATA) {
 			blk_off = get_cp(cur_data_blkoff[i]);
 			segno = get_cp(cur_data_segno[i]);
@@ -1551,6 +1594,14 @@ static void build_curseg(struct f2fs_sb_info *sbi)
 		array[i].alloc_type = cp->alloc_type[i];
 	}
 	restore_curseg_summaries(sbi);
+	return 0;
+
+seg_cleanup:
+	for(--i ; i >=0; --i)
+		free(array[i].sum_blk);
+	free(array);
+
+	return -ENOMEM;
 }
 
 static inline void check_seg_range(struct f2fs_sb_info *sbi, unsigned int segno)
@@ -1836,7 +1887,7 @@ void get_node_info(struct f2fs_sb_info *sbi, nid_t nid, struct node_info *ni)
 	node_info_from_raw_nat(ni, &raw_nat);
 }
 
-void build_sit_entries(struct f2fs_sb_info *sbi)
+static int build_sit_entries(struct f2fs_sb_info *sbi)
 {
 	struct sit_info *sit_i = SIT_I(sbi);
 	struct curseg_info *curseg = CURSEG_I(sbi, CURSEG_COLD_DATA);
@@ -1847,7 +1898,11 @@ void build_sit_entries(struct f2fs_sb_info *sbi)
 	unsigned int i, segno;
 
 	sit_blk = calloc(BLOCK_SZ, 1);
-	ASSERT(sit_blk);
+	if (!sit_blk) {
+		MSG(1, "\tError: Calloc failed for build_sit_entries!\n");
+		return -ENOMEM;
+	}
+
 	for (segno = 0; segno < TOTAL_SEGS(sbi); segno++) {
 		se = &sit_i->sentries[segno];
 
@@ -1867,18 +1922,20 @@ void build_sit_entries(struct f2fs_sb_info *sbi)
 		check_block_count(sbi, segno, &sit);
 		seg_info_from_raw_sit(se, &sit);
 	}
-
+	return 0;
 }
 
-int build_segment_manager(struct f2fs_sb_info *sbi)
+static int build_segment_manager(struct f2fs_sb_info *sbi)
 {
 	struct f2fs_super_block *sb = F2FS_RAW_SUPER(sbi);
 	struct f2fs_checkpoint *cp = F2FS_CKPT(sbi);
 	struct f2fs_sm_info *sm_info;
 
 	sm_info = malloc(sizeof(struct f2fs_sm_info));
-	if (!sm_info)
+	if (!sm_info) {
+		MSG(1, "\tError: Malloc failed for build_segment_manager!\n");
 		return -ENOMEM;
+	}
 
 	/* init sm info */
 	sbi->sm_info = sm_info;
@@ -1890,11 +1947,10 @@ int build_segment_manager(struct f2fs_sb_info *sbi)
 	sm_info->main_segments = get_sb(segment_count_main);
 	sm_info->ssa_blkaddr = get_sb(ssa_blkaddr);
 
-	build_sit_info(sbi);
-
-	build_curseg(sbi);
-
-	build_sit_entries(sbi);
+	if (build_sit_info(sbi) || build_curseg(sbi) || build_sit_entries(sbi)) {
+		free(sm_info);
+		return -ENOMEM;
+	}
 
 	return 0;
 }
@@ -2305,6 +2361,8 @@ void write_checkpoint(struct f2fs_sb_info *sbi)
 		orphan_blks = __start_sum_addr(sbi) - 1;
 		flags |= CP_ORPHAN_PRESENT_FLAG;
 	}
+	if (is_set_ckpt_flags(cp, CP_TRIMMED_FLAG))
+		flags |= CP_TRIMMED_FLAG;
 	if (is_set_ckpt_flags(cp, CP_DISABLED_FLAG))
 		flags |= CP_DISABLED_FLAG;
 

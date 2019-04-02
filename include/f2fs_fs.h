@@ -52,6 +52,8 @@
 # define UNUSED(x) UNUSED_ ## x __attribute__((unused))
 #elif defined(__LCLINT__)
 # define UNUSED(x) x
+#elif defined(__cplusplus)
+# define UNUSED(x)
 #else
 # define UNUSED(x) x
 #endif
@@ -1069,6 +1071,7 @@ typedef __le32	f2fs_hash_t;
 #define SIZE_OF_RESERVED	(PAGE_SIZE - ((SIZE_OF_DIR_ENTRY + \
 				F2FS_SLOT_LEN) * \
 				NR_DENTRY_IN_BLOCK + SIZE_OF_DENTRY_BITMAP))
+#define MIN_INLINE_DENTRY_SIZE		40	/* just include '.' and '..' entries */
 
 /* One directory entry slot representing F2FS_SLOT_LEN-sized file name */
 struct f2fs_dir_entry {
@@ -1379,9 +1382,9 @@ static inline int parse_feature(struct feature *table, const char *features)
 {
 	char *buf, *sub, *next;
 
-	buf = calloc(strlen(features) + 1, sizeof(char));
-	ASSERT(buf);
-	strncpy(buf, features, strlen(features) + 1);
+	buf = strdup(features);
+	if (!buf)
+		return -1;
 
 	for (sub = buf; sub && *sub; sub = next ? next + 1 : NULL) {
 		/* Skip the beginning blanks */
