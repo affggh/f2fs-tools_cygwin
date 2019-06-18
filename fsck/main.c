@@ -616,6 +616,8 @@ static void do_fsck(struct f2fs_sb_info *sbi)
 		c.fix_on = 1;
 	}
 
+	fsck_chk_checkpoint(sbi);
+
 	fsck_chk_quota_node(sbi);
 
 	/* Traverse all block recursively from root inode */
@@ -757,9 +759,13 @@ int main(int argc, char **argv)
 		}
 
 		/* allow ro-mounted partition */
-		MSG(0, "Info: Check FS only due to RO\n");
-		c.fix_on = 0;
-		c.auto_fix = 0;
+		if (c.force) {
+			MSG(0, "Info: Force to check/repair FS on RO mounted device\n");
+		} else {
+			MSG(0, "Info: Check FS only on RO mounted device\n");
+			c.fix_on = 0;
+			c.auto_fix = 0;
+		}
 	}
 
 	/* Get device */
@@ -805,6 +811,10 @@ fsck_again:
 #ifdef WITH_SLOAD
 	case SLOAD:
 		if (do_sload(sbi))
+			goto out_err;
+
+		ret = f2fs_sparse_initialize_meta(sbi);
+		if (ret < 0)
 			goto out_err;
 
 		f2fs_do_umount(sbi);
