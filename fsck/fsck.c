@@ -199,7 +199,7 @@ static int is_valid_ssa_node_blk(struct f2fs_sb_info *sbi, u32 nid,
 			need_fix = 1;
 		}
 	}
-	if (need_fix && !c.ro) {
+	if (need_fix && f2fs_dev_is_writable()) {
 		u64 ssa_blk;
 		int ret2;
 
@@ -325,7 +325,7 @@ static int is_valid_ssa_data_blk(struct f2fs_sb_info *sbi, u32 blk_addr,
 			need_fix = 1;
 		}
 	}
-	if (need_fix && !c.ro) {
+	if (need_fix && f2fs_dev_is_writable()) {
 		u64 ssa_blk;
 		int ret2;
 
@@ -660,7 +660,7 @@ void fsck_chk_inode_blk(struct f2fs_sb_info *sbi, u32 nid,
 	u64 i_size = le64_to_cpu(node_blk->i.i_size);
 	u64 i_blocks = le64_to_cpu(node_blk->i.i_blocks);
 	int ofs;
-	unsigned char *en;
+	char *en;
 	u32 namelen;
 	unsigned int idx = 0;
 	unsigned short i_gc_failures;
@@ -733,12 +733,12 @@ void fsck_chk_inode_blk(struct f2fs_sb_info *sbi, u32 nid,
 			if (node_blk->i.i_extra_isize >
 				cpu_to_le16(F2FS_TOTAL_EXTRA_ATTR_SIZE)) {
 				FIX_MSG("ino[0x%x] recover i_extra_isize "
-					"from %u to %lu",
+					"from %u to %u",
 					nid,
 					le16_to_cpu(node_blk->i.i_extra_isize),
-					F2FS_TOTAL_EXTRA_ATTR_SIZE);
+					calc_extra_isize());
 				node_blk->i.i_extra_isize =
-					cpu_to_le16(F2FS_TOTAL_EXTRA_ATTR_SIZE);
+					cpu_to_le16(calc_extra_isize());
 				need_fix = 1;
 			}
 		} else {
@@ -907,7 +907,7 @@ check:
 		}
 	}
 skip_blkcnt_fix:
-	en = malloc(F2FS_NAME_LEN + 1);
+	en = malloc(F2FS_PRINT_NAMELEN);
 	ASSERT(en);
 
 	namelen = le32_to_cpu(node_blk->i.i_namelen);
@@ -926,9 +926,8 @@ skip_blkcnt_fix:
 		} else
 			namelen = F2FS_NAME_LEN;
 	}
-	namelen = convert_encrypted_name(node_blk->i.i_name, namelen,
-					en, file_enc_name(&node_blk->i));
-	en[namelen] = '\0';
+	pretty_print_filename(node_blk->i.i_name, namelen, en,
+			      file_enc_name(&node_blk->i));
 	if (ftype == F2FS_FT_ORPHAN)
 		DBG(1, "Orphan Inode: 0x%x [%s] i_blocks: %u\n\n",
 				le32_to_cpu(node_blk->footer.ino),
@@ -1015,7 +1014,7 @@ skip_blkcnt_fix:
 	}
 
 	/* drop extent information to avoid potential wrong access */
-	if (need_fix && !c.ro)
+	if (need_fix && f2fs_dev_is_writable())
 		node_blk->i.i_ext.len = 0;
 
 	if ((c.feature & cpu_to_le32(F2FS_FEATURE_INODE_CHKSUM)) &&
@@ -1038,7 +1037,7 @@ skip_blkcnt_fix:
 		}
 	}
 
-	if (need_fix && !c.ro) {
+	if (need_fix && f2fs_dev_is_writable()) {
 		ret = dev_write_block(node_blk, ni->blk_addr);
 		ASSERT(ret >= 0);
 	}
@@ -1073,7 +1072,7 @@ int fsck_chk_dnode_blk(struct f2fs_sb_info *sbi, struct f2fs_inode *inode,
 			FIX_MSG("[0x%x] dn.addr[%d] = 0", nid, idx);
 		}
 	}
-	if (need_fix && !c.ro) {
+	if (need_fix && f2fs_dev_is_writable()) {
 		ret = dev_write_block(node_blk, ni->blk_addr);
 		ASSERT(ret >= 0);
 	}
@@ -1110,7 +1109,7 @@ skip:
 		}
 	}
 
-	if (need_fix && !c.ro) {
+	if (need_fix && f2fs_dev_is_writable()) {
 		struct node_info ni;
 		nid_t nid = le32_to_cpu(node_blk->footer.nid);
 
@@ -1152,7 +1151,7 @@ skip:
 		}
 	}
 
-	if (need_fix && !c.ro) {
+	if (need_fix && f2fs_dev_is_writable()) {
 		struct node_info ni;
 		nid_t nid = le32_to_cpu(node_blk->footer.nid);
 
@@ -1168,45 +1167,40 @@ static const char *lookup_table =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,";
 
 /**
- * digest_encode() -
+ * base64_encode() -
  *
- * Encodes the input digest using characters from the set [a-zA-Z0-9_+].
+ * Encodes the input string using characters from the set [A-Za-z0-9+,].
  * The encoded string is roughly 4/3 times the size of the input string.
  */
-static int digest_encode(const char *src, int len, char *dst)
+static int base64_encode(const u8 *src, int len, char *dst)
 {
-	int i = 0, bits = 0, ac = 0;
+	int i, bits = 0, ac = 0;
 	char *cp = dst;
 
-	while (i < len && i < 24) {
-		ac += (((unsigned char) src[i]) << bits);
+	for (i = 0; i < len; i++) {
+		ac += src[i] << bits;
 		bits += 8;
 		do {
 			*cp++ = lookup_table[ac & 0x3f];
 			ac >>= 6;
 			bits -= 6;
 		} while (bits >= 6);
-		i++;
 	}
 	if (bits)
 		*cp++ = lookup_table[ac & 0x3f];
-	*cp = 0;
 	return cp - dst;
 }
 
-int convert_encrypted_name(unsigned char *name, u32 len,
-				unsigned char *new, int enc_name)
+void pretty_print_filename(const u8 *raw_name, u32 len,
+			   char out[F2FS_PRINT_NAMELEN], int enc_name)
 {
-	if (!enc_name) {
-		if (len > F2FS_NAME_LEN)
-			len = F2FS_NAME_LEN;
-		memcpy(new, name, len);
-		new[len] = 0;
-		return len;
-	}
+	len = min(len, (u32)F2FS_NAME_LEN);
 
-	*new = '_';
-	return digest_encode((const char *)name, len, (char *)new + 1);
+	if (enc_name)
+		len = base64_encode(raw_name, len, out);
+	else
+		memcpy(out, raw_name, len);
+	out[len] = 0;
 }
 
 static void print_dentry(__u32 depth, __u8 *name,
@@ -1218,7 +1212,7 @@ static void print_dentry(__u32 depth, __u8 *name,
 	u32 name_len;
 	unsigned int i;
 	int bit_offset;
-	unsigned char new[F2FS_NAME_LEN + 1];
+	char new[F2FS_PRINT_NAMELEN];
 
 	if (!c.show_dentry)
 		return;
@@ -1248,7 +1242,7 @@ static void print_dentry(__u32 depth, __u8 *name,
 	for (i = 1; i < depth; i++)
 		printf("%c   ", tree_mark[i]);
 
-	convert_encrypted_name(name, name_len, new, enc_name);
+	pretty_print_filename(name, name_len, new, enc_name);
 
 	printf("%c-- %s <ino = 0x%x>, <encrypted (%d)>\n",
 			last_de ? '`' : '|',
@@ -1263,10 +1257,9 @@ static int f2fs_check_hash_code(struct f2fs_dir_entry *dentry,
 
 	/* fix hash_code made by old buggy code */
 	if (dentry->hash_code != hash_code) {
-		unsigned char new[F2FS_NAME_LEN + 1];
+		char new[F2FS_PRINT_NAMELEN];
 
-		convert_encrypted_name((unsigned char *)name, len,
-							new, enc_name);
+		pretty_print_filename(name, len, new, enc_name);
 		FIX_MSG("Mismatch hash_code for \"%s\" [%x:%x]",
 				new, le32_to_cpu(dentry->hash_code),
 				hash_code);
@@ -1380,8 +1373,8 @@ static int __chk_dentries(struct f2fs_sb_info *sbi, struct child_info *child,
 	int dentries = 0;
 	u32 blk_cnt;
 	u8 *name;
-	unsigned char en[F2FS_NAME_LEN + 1];
-	u16 name_len, en_len;
+	char en[F2FS_PRINT_NAMELEN];
+	u16 name_len;
 	int ret = 0;
 	int fixed = 0;
 	int i, slots;
@@ -1507,8 +1500,7 @@ static int __chk_dentries(struct f2fs_sb_info *sbi, struct child_info *child,
 			}
 		}
 
-		en_len = convert_encrypted_name(name, name_len, en, enc_name);
-		en[en_len] = '\0';
+		pretty_print_filename(name, name_len, en, enc_name);
 		DBG(1, "[%3u]-[0x%x] name[%s] len[0x%x] ino[0x%x] type[0x%x]\n",
 				fsck->dentry_depth, i, en, name_len,
 				le32_to_cpu(dentry[i].ino),
@@ -1595,7 +1587,7 @@ int fsck_chk_dentry_blk(struct f2fs_sb_info *sbi, u32 blk_addr,
 			de_blk->dentry, de_blk->filename,
 			NR_DENTRY_IN_BLOCK, last_blk, enc_name);
 
-	if (dentries < 0 && !c.ro) {
+	if (dentries < 0 && f2fs_dev_is_writable()) {
 		ret = dev_write_block(de_blk, blk_addr);
 		ASSERT(ret >= 0);
 		DBG(1, "[%3d] Dentry Block [0x%x] Fixed hash_codes\n\n",
@@ -1708,7 +1700,7 @@ int fsck_chk_orphan_node(struct f2fs_sb_info *sbi)
 			else if (ret)
 				ASSERT_MSG("[0x%x] wrong orphan inode", ino);
 		}
-		if (!c.ro && c.fix_on &&
+		if (f2fs_dev_is_writable() && c.fix_on &&
 				entry_count != new_entry_count) {
 			new_blk->entry_count = cpu_to_le32(new_entry_count);
 			ret = dev_write_block(new_blk, start_blk + i);
@@ -1917,6 +1909,19 @@ int fsck_chk_meta(struct f2fs_sb_info *sbi)
 	return 0;
 }
 
+void fsck_chk_checkpoint(struct f2fs_sb_info *sbi)
+{
+	struct f2fs_checkpoint *cp = F2FS_CKPT(sbi);
+
+	if (get_cp(ckpt_flags) & CP_LARGE_NAT_BITMAP_FLAG) {
+		if (get_cp(checksum_offset) != CP_MIN_CHKSUM_OFFSET) {
+			ASSERT_MSG("Deprecated layout of large_nat_bitmap, "
+				"chksum_offset:%u", get_cp(checksum_offset));
+			c.fix_chksum = 1;
+		}
+	}
+}
+
 void fsck_init(struct f2fs_sb_info *sbi)
 {
 	struct f2fs_fsck *fsck = F2FS_FSCK(sbi);
@@ -2017,6 +2022,23 @@ static void flush_curseg_sit_entries(struct f2fs_sb_info *sbi)
 	free(sit_blk);
 }
 
+static void fix_checksum(struct f2fs_sb_info *sbi)
+{
+	struct f2fs_checkpoint *cp = F2FS_CKPT(sbi);
+	struct f2fs_nm_info *nm_i = NM_I(sbi);
+	struct sit_info *sit_i = SIT_I(sbi);
+	void *bitmap_offset;
+
+	if (!c.fix_chksum)
+		return;
+
+	bitmap_offset = cp->sit_nat_version_bitmap + sizeof(__le32);
+
+	memcpy(bitmap_offset, nm_i->nat_bitmap, nm_i->bitmap_size);
+	memcpy(bitmap_offset + nm_i->bitmap_size,
+			sit_i->sit_bitmap, sit_i->bitmap_size);
+}
+
 static void fix_checkpoint(struct f2fs_sb_info *sbi)
 {
 	struct f2fs_fsck *fsck = F2FS_FSCK(sbi);
@@ -2038,6 +2060,12 @@ static void fix_checkpoint(struct f2fs_sb_info *sbi)
 		flags |= CP_TRIMMED_FLAG;
 	if (is_set_ckpt_flags(cp, CP_DISABLED_FLAG))
 		flags |= CP_DISABLED_FLAG;
+	if (is_set_ckpt_flags(cp, CP_LARGE_NAT_BITMAP_FLAG)) {
+		flags |= CP_LARGE_NAT_BITMAP_FLAG;
+		set_cp(checksum_offset, CP_MIN_CHKSUM_OFFSET);
+	} else {
+		set_cp(checksum_offset, CP_CHKSUM_OFFSET);
+	}
 
 	if (flags & CP_UMOUNT_FLAG)
 		cp_blocks = 8;
@@ -2056,8 +2084,9 @@ static void fix_checkpoint(struct f2fs_sb_info *sbi)
 	set_cp(valid_node_count, fsck->chk.valid_node_cnt);
 	set_cp(valid_inode_count, fsck->chk.valid_inode_cnt);
 
-	crc = f2fs_cal_crc32(F2FS_SUPER_MAGIC, cp, CP_CHKSUM_OFFSET);
-	*((__le32 *)((unsigned char *)cp + CP_CHKSUM_OFFSET)) = cpu_to_le32(crc);
+	crc = f2fs_checkpoint_chksum(cp);
+	*((__le32 *)((unsigned char *)cp + get_cp(checksum_offset))) =
+							cpu_to_le32(crc);
 
 	cp_blk_no = get_sb(cp_blkaddr);
 	if (sbi->cur_cp == 2)
@@ -2067,8 +2096,8 @@ static void fix_checkpoint(struct f2fs_sb_info *sbi)
 	ASSERT(ret >= 0);
 
 	for (i = 0; i < get_sb(cp_payload); i++) {
-		ret = dev_write_block(((unsigned char *)cp) + i * F2FS_BLKSIZE,
-								cp_blk_no++);
+		ret = dev_write_block(((unsigned char *)cp) +
+					(i + 1) * F2FS_BLKSIZE, cp_blk_no++);
 		ASSERT(ret >= 0);
 	}
 
@@ -2092,35 +2121,64 @@ static void fix_checkpoint(struct f2fs_sb_info *sbi)
 		write_nat_bits(sbi, sb, cp, sbi->cur_cp);
 }
 
-int check_curseg_offset(struct f2fs_sb_info *sbi)
+int check_curseg_offset(struct f2fs_sb_info *sbi, int type)
 {
-	int i;
+	struct curseg_info *curseg = CURSEG_I(sbi, type);
+	struct seg_entry *se;
+	int j, nblocks;
 
-	for (i = 0; i < NO_CHECK_TYPE; i++) {
-		struct curseg_info *curseg = CURSEG_I(sbi, i);
-		struct seg_entry *se;
-		int j, nblocks;
+	if ((curseg->next_blkoff >> 3) >= SIT_VBLOCK_MAP_SIZE) {
+		ASSERT_MSG("Next block offset:%u is invalid, type:%d",
+			curseg->next_blkoff, type);
+		return -EINVAL;
+	}
+	se = get_seg_entry(sbi, curseg->segno);
+	if (f2fs_test_bit(curseg->next_blkoff,
+				(const char *)se->cur_valid_map)) {
+		ASSERT_MSG("Next block offset is not free, type:%d", type);
+		return -EINVAL;
+	}
+	if (curseg->alloc_type == SSR)
+		return 0;
 
-		if ((curseg->next_blkoff >> 3) >= SIT_VBLOCK_MAP_SIZE)
+	nblocks = sbi->blocks_per_seg;
+	for (j = curseg->next_blkoff + 1; j < nblocks; j++) {
+		if (f2fs_test_bit(j, (const char *)se->cur_valid_map)) {
+			ASSERT_MSG("For LFS curseg, space after .next_blkoff "
+				"should be unused, type:%d", type);
 			return -EINVAL;
-		se = get_seg_entry(sbi, curseg->segno);
-		if (f2fs_test_bit(curseg->next_blkoff,
-					(const char *)se->cur_valid_map)) {
-			ASSERT_MSG("Next block offset is not free, type:%d", i);
-			return -EINVAL;
-		}
-		if (curseg->alloc_type == SSR)
-			continue;
-
-		nblocks = sbi->blocks_per_seg;
-		for (j = curseg->next_blkoff + 1; j < nblocks; j++) {
-			if (f2fs_test_bit(j, (const char *)se->cur_valid_map)) {
-				ASSERT_MSG("LFS must have free section:%d", i);
-				return -EINVAL;
-			}
 		}
 	}
 	return 0;
+}
+
+int check_curseg_offsets(struct f2fs_sb_info *sbi)
+{
+	int i, ret;
+
+	for (i = 0; i < NO_CHECK_TYPE; i++) {
+		ret = check_curseg_offset(sbi, i);
+		if (ret)
+			return ret;
+	}
+	return 0;
+}
+
+static void fix_curseg_info(struct f2fs_sb_info *sbi)
+{
+	int i, need_update = 0;
+
+	for (i = 0; i < NO_CHECK_TYPE; i++) {
+		if (check_curseg_offset(sbi, i)) {
+			update_curseg_info(sbi, i);
+			need_update = 1;
+		}
+	}
+
+	if (need_update) {
+		write_curseg_info(sbi);
+		flush_curseg_sit_entries(sbi);
+	}
 }
 
 int check_sit_types(struct f2fs_sb_info *sbi)
@@ -2666,7 +2724,7 @@ int fsck_verify(struct f2fs_sb_info *sbi)
 	}
 
 	printf("[FSCK] next block offset is free                     ");
-	if (check_curseg_offset(sbi) == 0) {
+	if (check_curseg_offsets(sbi) == 0) {
 		printf(" [Ok..]\n");
 	} else {
 		printf(" [Fail]\n");
@@ -2702,7 +2760,7 @@ int fsck_verify(struct f2fs_sb_info *sbi)
 	}
 #endif
 	/* fix global metadata */
-	if (force || (c.fix_on && !c.ro)) {
+	if (force || (c.fix_on && f2fs_dev_is_writable())) {
 		struct f2fs_checkpoint *cp = F2FS_CKPT(sbi);
 
 		if (force || c.bug_on || c.bug_nat_bits) {
@@ -2711,11 +2769,8 @@ int fsck_verify(struct f2fs_sb_info *sbi)
 			fix_hard_links(sbi);
 			fix_nat_entries(sbi);
 			rewrite_sit_area_bitmap(sbi);
-			if (check_curseg_offset(sbi)) {
-				move_curseg_info(sbi, SM_I(sbi)->main_blkaddr, 0);
-				write_curseg_info(sbi);
-				flush_curseg_sit_entries(sbi);
-			}
+			fix_curseg_info(sbi);
+			fix_checksum(sbi);
 			fix_checkpoint(sbi);
 		} else if (is_set_ckpt_flags(cp, CP_FSCK_FLAG) ||
 			is_set_ckpt_flags(cp, CP_QUOTA_NEED_FSCK_FLAG)) {
