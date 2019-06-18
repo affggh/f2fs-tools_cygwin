@@ -342,13 +342,11 @@ static int f2fs_prepare_super_block(void)
 		 * It requires more pages for cp.
 		 */
 		if (max_sit_bitmap_size > MAX_SIT_BITMAP_SIZE_IN_CKPT) {
-			max_nat_bitmap_size = CP_CHKSUM_OFFSET -
-					sizeof(struct f2fs_checkpoint) + 1;
+			max_nat_bitmap_size = MAX_BITMAP_SIZE_IN_CKPT;
 			set_sb(cp_payload, F2FS_BLK_ALIGN(max_sit_bitmap_size));
 	        } else {
-			max_nat_bitmap_size =
-				CP_CHKSUM_OFFSET - sizeof(struct f2fs_checkpoint) + 1
-				- max_sit_bitmap_size;
+			max_nat_bitmap_size = MAX_BITMAP_SIZE_IN_CKPT -
+							max_sit_bitmap_size;
 			set_sb(cp_payload, 0);
 		}
 		max_nat_segments = (max_nat_bitmap_size * 8) >> log_blks_per_seg;
@@ -692,10 +690,13 @@ static int f2fs_write_check_point_pack(void)
 	set_cp(nat_ver_bitmap_bytesize, ((get_sb(segment_count_nat) / 2) <<
 			 get_sb(log_blocks_per_seg)) / 8);
 
-	set_cp(checksum_offset, CP_CHKSUM_OFFSET);
+	if (c.large_nat_bitmap)
+		set_cp(checksum_offset, CP_MIN_CHKSUM_OFFSET);
+	else
+		set_cp(checksum_offset, CP_CHKSUM_OFFSET);
 
-	crc = f2fs_cal_crc32(F2FS_SUPER_MAGIC, cp, CP_CHKSUM_OFFSET);
-	*((__le32 *)((unsigned char *)cp + CP_CHKSUM_OFFSET)) =
+	crc = f2fs_checkpoint_chksum(cp);
+	*((__le32 *)((unsigned char *)cp + get_cp(checksum_offset))) =
 							cpu_to_le32(crc);
 
 	blk_size_bytes = 1 << get_sb(log_blocksize);
@@ -940,8 +941,8 @@ static int f2fs_write_check_point_pack(void)
 	 */
 	cp->checkpoint_ver = 0;
 
-	crc = f2fs_cal_crc32(F2FS_SUPER_MAGIC, cp, CP_CHKSUM_OFFSET);
-	*((__le32 *)((unsigned char *)cp + CP_CHKSUM_OFFSET)) =
+	crc = f2fs_checkpoint_chksum(cp);
+	*((__le32 *)((unsigned char *)cp + get_cp(checksum_offset))) =
 							cpu_to_le32(crc);
 	cp_seg_blk = get_sb(segment0_blkaddr) + c.blks_per_seg;
 	DBG(1, "\tWriting cp page 1 of checkpoint pack 2, at offset 0x%08"PRIx64"\n",
@@ -1113,8 +1114,7 @@ static int f2fs_write_root_inode(void)
 
 	if (c.feature & cpu_to_le32(F2FS_FEATURE_EXTRA_ATTR)) {
 		raw_node->i.i_inline = F2FS_EXTRA_ATTR;
-		raw_node->i.i_extra_isize =
-				cpu_to_le16(F2FS_TOTAL_EXTRA_ATTR_SIZE);
+		raw_node->i.i_extra_isize = cpu_to_le16(calc_extra_isize());
 	}
 
 	if (c.feature & cpu_to_le32(F2FS_FEATURE_PRJQUOTA))
@@ -1270,8 +1270,7 @@ static int f2fs_write_qf_inode(int qtype)
 
 	if (c.feature & cpu_to_le32(F2FS_FEATURE_EXTRA_ATTR)) {
 		raw_node->i.i_inline = F2FS_EXTRA_ATTR;
-		raw_node->i.i_extra_isize =
-				cpu_to_le16(F2FS_TOTAL_EXTRA_ATTR_SIZE);
+		raw_node->i.i_extra_isize = cpu_to_le16(calc_extra_isize());
 	}
 
 	if (c.feature & cpu_to_le32(F2FS_FEATURE_PRJQUOTA))
@@ -1473,8 +1472,7 @@ static int f2fs_write_lpf_inode(void)
 
 	if (c.feature & cpu_to_le32(F2FS_FEATURE_EXTRA_ATTR)) {
 		raw_node->i.i_inline = F2FS_EXTRA_ATTR;
-		raw_node->i.i_extra_isize =
-			cpu_to_le16(F2FS_TOTAL_EXTRA_ATTR_SIZE);
+		raw_node->i.i_extra_isize = cpu_to_le16(calc_extra_isize());
 	}
 
 	if (c.feature & cpu_to_le32(F2FS_FEATURE_PRJQUOTA))
