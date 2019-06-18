@@ -532,6 +532,20 @@ __u32 f2fs_inode_chksum(struct f2fs_node *node)
 	return chksum;
 }
 
+__u32 f2fs_checkpoint_chksum(struct f2fs_checkpoint *cp)
+{
+	unsigned int chksum_ofs = le32_to_cpu(cp->checksum_offset);
+	__u32 chksum;
+
+	chksum = f2fs_cal_crc32(F2FS_SUPER_MAGIC, cp, chksum_ofs);
+	if (chksum_ofs < CP_CHKSUM_OFFSET) {
+		chksum_ofs += sizeof(chksum);
+		chksum = f2fs_cal_crc32(chksum, (__u8 *)cp + chksum_ofs,
+						F2FS_BLKSIZE - chksum_ofs);
+	}
+	return chksum;
+}
+
 /*
  * try to identify the root device
  */
@@ -628,6 +642,11 @@ void f2fs_init_configuration(void)
 	/* default root owner */
 	c.root_uid = getuid();
 	c.root_gid = getgid();
+}
+
+int f2fs_dev_is_writable(void)
+{
+	return !c.ro || c.force;
 }
 
 #ifdef HAVE_SETMNTENT
@@ -789,6 +808,15 @@ void get_kernel_uname_version(__u8 *version)
 #endif /* APPLE_DARWIN */
 
 #ifndef ANDROID_WINDOWS_HOST
+static int open_check_fs(char *path, int flag)
+{
+	if (c.func != FSCK || c.fix_on || c.auto_fix)
+		return -1;
+
+	/* allow to open ro */
+	return open(path, O_RDONLY | flag);
+}
+
 int get_device_info(int i)
 {
 	int32_t fd = 0;
@@ -810,8 +838,11 @@ int get_device_info(int i)
 	if (c.sparse_mode) {
 		fd = open(dev->path, O_RDWR | O_CREAT | O_BINARY, 0644);
 		if (fd < 0) {
-			MSG(0, "\tError: Failed to open a sparse file!\n");
-			return -1;
+			fd = open_check_fs(dev->path, O_BINARY);
+			if (fd < 0) {
+				MSG(0, "\tError: Failed to open a sparse file!\n");
+				return -1;
+			}
 		}
 	}
 
@@ -825,10 +856,15 @@ int get_device_info(int i)
 			return -1;
 		}
 
-		if (S_ISBLK(stat_buf->st_mode) && !c.force)
+		if (S_ISBLK(stat_buf->st_mode) && !c.force) {
 			fd = open(dev->path, O_RDWR | O_EXCL);
-		else
+			if (fd < 0)
+				fd = open_check_fs(dev->path, O_EXCL);
+		} else {
 			fd = open(dev->path, O_RDWR);
+			if (fd < 0)
+				fd = open_check_fs(dev->path, 0);
+		}
 	}
 	if (fd < 0) {
 		MSG(0, "\tError: Failed to open the device!\n");
@@ -1116,4 +1152,20 @@ int f2fs_get_device_info(void)
 				c.total_sectors, (c.total_sectors *
 					(c.sector_size >> 9)) >> 11);
 	return 0;
+}
+
+unsigned int calc_extra_isize(void)
+{
+	unsigned int size = offsetof(struct f2fs_inode, i_projid);
+
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_FLEXIBLE_INLINE_XATTR))
+		size = offsetof(struct f2fs_inode, i_projid);
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_PRJQUOTA))
+		size = offsetof(struct f2fs_inode, i_inode_checksum);
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_INODE_CHKSUM))
+		size = offsetof(struct f2fs_inode, i_crtime);
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_INODE_CRTIME))
+		size = offsetof(struct f2fs_inode, i_extra_end);
+
+	return size - F2FS_EXTRA_ISIZE_OFFSET;
 }
