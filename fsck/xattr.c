@@ -83,7 +83,7 @@ static void write_all_xattrs(struct f2fs_sb_info *sbi,
 		return;
 
 	if (!xnid) {
-		f2fs_alloc_nid(sbi, &new_nid, 0);
+		f2fs_alloc_nid(sbi, &new_nid);
 
 		set_new_dnode(&dn, inode, NULL, new_nid);
 		/* NAT entry would be updated by new_node_page. */
@@ -223,8 +223,7 @@ int f2fs_setxattr(struct f2fs_sb_info *sbi, nid_t ino, int index, const char *na
 	write_all_xattrs(sbi, inode, new_hsize, base_addr);
 
 	/* inode need update */
-	ret = dev_write_block(inode, ni.blk_addr);
-	ASSERT(ret >= 0);
+	ASSERT(write_inode(inode, ni.blk_addr) >= 0);
 exit:
 	free(inode);
 	free(base_addr);
