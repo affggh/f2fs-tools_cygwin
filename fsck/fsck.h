@@ -148,10 +148,10 @@ extern int fsck_chk_idnode_blk(struct f2fs_sb_info *, struct f2fs_inode *,
 		enum FILE_TYPE, struct f2fs_node *, u32 *, struct child_info *);
 extern int fsck_chk_didnode_blk(struct f2fs_sb_info *, struct f2fs_inode *,
 		enum FILE_TYPE, struct f2fs_node *, u32 *, struct child_info *);
-extern int fsck_chk_data_blk(struct f2fs_sb_info *sbi, u32, struct child_info *,
-		int, enum FILE_TYPE, u32, u16, u8, int);
-extern int fsck_chk_dentry_blk(struct f2fs_sb_info *, u32, struct child_info *,
-		int, int);
+extern int fsck_chk_data_blk(struct f2fs_sb_info *, int,
+		u32, struct child_info *, int, enum FILE_TYPE, u32, u16, u8, int);
+extern int fsck_chk_dentry_blk(struct f2fs_sb_info *, int,
+		u32, struct child_info *, int, int);
 int fsck_chk_inline_dentries(struct f2fs_sb_info *, struct f2fs_node *,
 		struct child_info *);
 void fsck_chk_checkpoint(struct f2fs_sb_info *sbi);
@@ -180,6 +180,7 @@ extern int f2fs_set_sit_bitmap(struct f2fs_sb_info *, u32);
 extern void fsck_init(struct f2fs_sb_info *);
 extern int fsck_verify(struct f2fs_sb_info *);
 extern void fsck_free(struct f2fs_sb_info *);
+extern int f2fs_ra_meta_pages(struct f2fs_sb_info *, block_t, int, int);
 extern int f2fs_do_mount(struct f2fs_sb_info *);
 extern void f2fs_do_umount(struct f2fs_sb_info *);
 extern int f2fs_sparse_initialize_meta(struct f2fs_sb_info *);
@@ -191,7 +192,9 @@ extern void flush_sit_entries(struct f2fs_sb_info *);
 extern void move_curseg_info(struct f2fs_sb_info *, u64, int);
 extern void write_curseg_info(struct f2fs_sb_info *);
 extern int find_next_free_block(struct f2fs_sb_info *, u64 *, int, int);
+extern void duplicate_checkpoint(struct f2fs_sb_info *);
 extern void write_checkpoint(struct f2fs_sb_info *);
+extern void write_checkpoints(struct f2fs_sb_info *);
 extern void update_superblock(struct f2fs_super_block *, int);
 extern void update_data_blkaddr(struct f2fs_sb_info *, nid_t, u16, block_t);
 extern void update_nat_blkaddr(struct f2fs_sb_info *, nid_t, nid_t, block_t);
@@ -227,6 +230,8 @@ extern void sit_dump(struct f2fs_sb_info *, unsigned int, unsigned int);
 extern void ssa_dump(struct f2fs_sb_info *, int, int);
 extern void dump_node(struct f2fs_sb_info *, nid_t, int);
 extern int dump_info_from_blkaddr(struct f2fs_sb_info *, u32);
+extern unsigned int start_bidx_of_node(unsigned int, struct f2fs_node *);
+
 
 /* defrag.c */
 int f2fs_defragment(struct f2fs_sb_info *, u64, u64, u64, int);
@@ -238,12 +243,12 @@ int f2fs_resize(struct f2fs_sb_info *);
 int f2fs_sload(struct f2fs_sb_info *);
 
 /* segment.c */
-void reserve_new_block(struct f2fs_sb_info *, block_t *,
-					struct f2fs_summary *, int);
+int reserve_new_block(struct f2fs_sb_info *, block_t *,
+					struct f2fs_summary *, int, bool);
 int new_data_block(struct f2fs_sb_info *, void *,
 					struct dnode_of_data *, int);
 int f2fs_build_file(struct f2fs_sb_info *, struct dentry *);
-void f2fs_alloc_nid(struct f2fs_sb_info *, nid_t *, int);
+void f2fs_alloc_nid(struct f2fs_sb_info *, nid_t *);
 void set_data_blkaddr(struct dnode_of_data *);
 block_t new_node_block(struct f2fs_sb_info *,
 					struct dnode_of_data *, unsigned int);
