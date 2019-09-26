@@ -16,6 +16,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <libgen.h>
 #ifdef HAVE_MNTENT_H
 #include <mntent.h>
 #endif
@@ -440,7 +441,7 @@ static void str2hashbuf(const unsigned char *msg, int len,
  * @param len           name lenth
  * @return              return on success hash value, errno on failure
  */
-f2fs_hash_t f2fs_dentry_hash(const unsigned char *name, int len)
+static f2fs_hash_t __f2fs_dentry_hash(const unsigned char *name, int len)/* Need update */
 {
 	__u32 hash;
 	f2fs_hash_t	f2fs_hash;
@@ -471,6 +472,31 @@ f2fs_hash_t f2fs_dentry_hash(const unsigned char *name, int len)
 
 	f2fs_hash = cpu_to_le32(hash & ~F2FS_HASH_COL_BIT);
 	return f2fs_hash;
+}
+
+f2fs_hash_t f2fs_dentry_hash(int encoding, int casefolded,
+                             const unsigned char *name, int len)
+{
+	const struct f2fs_nls_table *table = f2fs_load_nls_table(encoding);
+	int r, dlen;
+	unsigned char *buff;
+
+	if (len && casefolded) {
+		buff = malloc(sizeof(char) * PATH_MAX);
+		if (!buff)
+			return -ENOMEM;
+		dlen = table->ops->casefold(table, name, len, buff, PATH_MAX);
+		if (dlen < 0) {
+			free(buff);
+			goto opaque_seq;
+		}
+		r = __f2fs_dentry_hash(buff, dlen);
+
+		free(buff);
+		return r;
+	}
+opaque_seq:
+	return __f2fs_dentry_hash(name, len);
 }
 
 unsigned int addrs_per_inode(struct f2fs_inode *i)
@@ -544,6 +570,14 @@ __u32 f2fs_checkpoint_chksum(struct f2fs_checkpoint *cp)
 						F2FS_BLKSIZE - chksum_ofs);
 	}
 	return chksum;
+}
+
+int write_inode(struct f2fs_node *inode, u64 blkaddr)
+{
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_INODE_CHKSUM))
+		inode->i.i_inode_checksum =
+			cpu_to_le32(f2fs_inode_chksum(inode));
+	return dev_write_block(inode, blkaddr);
 }
 
 /*
@@ -638,6 +672,8 @@ void f2fs_init_configuration(void)
 	c.trim = 1;
 	c.kd = -1;
 	c.fixed_time = -1;
+	c.s_encoding = 0;
+	c.s_encoding_flags = 0;
 
 	/* default root owner */
 	c.root_uid = getuid();
@@ -810,7 +846,7 @@ void get_kernel_uname_version(__u8 *version)
 #ifndef ANDROID_WINDOWS_HOST
 static int open_check_fs(char *path, int flag)
 {
-	if (c.func != FSCK || c.fix_on || c.auto_fix)
+	if (c.func != DUMP && (c.func != FSCK || c.fix_on || c.auto_fix))
 		return -1;
 
 	/* allow to open ro */
@@ -856,7 +892,7 @@ int get_device_info(int i)
 			return -1;
 		}
 
-		if (S_ISBLK(stat_buf->st_mode) && !c.force) {
+		if (S_ISBLK(stat_buf->st_mode) && !c.force && c.func != DUMP) {
 			fd = open(dev->path, O_RDWR | O_EXCL);
 			if (fd < 0)
 				fd = open_check_fs(dev->path, O_EXCL);
@@ -961,19 +997,26 @@ int get_device_info(int i)
 	}
 
 #if !defined(WITH_ANDROID) && defined(__linux__)
-	if (S_ISBLK(stat_buf->st_mode))
-		f2fs_get_zoned_model(i);
+	if (S_ISBLK(stat_buf->st_mode)) {
+		if (f2fs_get_zoned_model(i) < 0) {
+			free(stat_buf);
+			return -1;
+		}
+	}
 
 	if (dev->zoned_model != F2FS_ZONED_NONE) {
-		if (dev->zoned_model == F2FS_ZONED_HM)
-			c.zoned_model = F2FS_ZONED_HM;
 
+		/* Get the number of blocks per zones */
 		if (f2fs_get_zone_blocks(i)) {
 			MSG(0, "\tError: Failed to get number of blocks per zone\n");
 			free(stat_buf);
 			return -1;
 		}
 
+		/*
+		 * Check zone configuration: for the first disk of a
+		 * multi-device volume, conventional zones are needed.
+		 */
 		if (f2fs_check_zones(i)) {
 			MSG(0, "\tError: Failed to check zone configuration\n");
 			free(stat_buf);
@@ -1121,26 +1164,61 @@ int f2fs_get_device_info(void)
 		return -1;
 	}
 
+	/*
+	 * Check device types and determine the final volume operation mode:
+	 *   - If all devices are regular block devices, default operation.
+	 *   - If at least one HM device is found, operate in HM mode (BLKZONED
+	 *     feature will be enabled by mkfs).
+	 *   - If an HA device is found, let mkfs decide based on the -m option
+	 *     setting by the user.
+	 */
+	c.zoned_model = F2FS_ZONED_NONE;
 	for (i = 0; i < c.ndevs; i++) {
-		if (c.devices[i].zoned_model != F2FS_ZONED_NONE) {
+		switch (c.devices[i].zoned_model) {
+		case F2FS_ZONED_NONE:
+			continue;
+		case F2FS_ZONED_HM:
+			c.zoned_model = F2FS_ZONED_HM;
+			break;
+		case F2FS_ZONED_HA:
+			if (c.zoned_model != F2FS_ZONED_HM)
+				c.zoned_model = F2FS_ZONED_HA;
+			break;
+		}
+	}
+
+	if (c.zoned_model != F2FS_ZONED_NONE) {
+
+		/*
+		 * For zoned model, the zones sizes of all zoned devices must
+		 * be equal.
+		 */
+		for (i = 0; i < c.ndevs; i++) {
+			if (c.devices[i].zoned_model == F2FS_ZONED_NONE)
+				continue;
 			if (c.zone_blocks &&
 				c.zone_blocks != c.devices[i].zone_blocks) {
-				MSG(0, "\tError: not support different zone sizes!!!\n");
+				MSG(0, "\tError: zones of different size are "
+				       "not supported\n");
 				return -1;
 			}
 			c.zone_blocks = c.devices[i].zone_blocks;
 		}
-	}
 
-	/*
-	 * Align sections to the device zone size
-	 * and align F2FS zones to the device zones.
-	 */
-	if (c.zone_blocks) {
+		/*
+		 * Align sections to the device zone size and align F2FS zones
+		 * to the device zones. For F2FS_ZONED_HA model without the
+		 * BLKZONED feature set at format time, this is only an
+		 * optimization as sequential writes will not be enforced.
+		 */
 		c.segs_per_sec = c.zone_blocks / DEFAULT_BLOCKS_PER_SEGMENT;
 		c.secs_per_zone = 1;
 	} else {
-		c.zoned_mode = 0;
+		if(c.zoned_mode != 0) {
+			MSG(0, "\n Error: %s may not be a zoned block device \n",
+					c.devices[0].path);
+			return -1;
+		}
 	}
 
 	c.segs_per_zone = c.segs_per_sec * c.secs_per_zone;
@@ -1168,4 +1246,86 @@ unsigned int calc_extra_isize(void)
 		size = offsetof(struct f2fs_inode, i_extra_end);
 
 	return size - F2FS_EXTRA_ISIZE_OFFSET;
+}
+
+#define ARRAY_SIZE(array)			\
+	(sizeof(array) / sizeof(array[0]))
+
+static const struct {
+	char *name;
+	__u16 encoding_magic;
+	__u16 default_flags;
+
+} f2fs_encoding_map[] = {
+	{
+		.encoding_magic = F2FS_ENC_UTF8_12_1,
+		.name = "utf8",
+		.default_flags = 0,
+	},
+};
+
+static const struct enc_flags {
+	__u16 flag;
+	char *param;
+} encoding_flags[] = {
+	{ F2FS_ENC_STRICT_MODE_FL, "strict" },
+};
+
+/* Return a positive number < 0xff indicating the encoding magic number
+ * or a negative value indicating error. */
+int f2fs_str2encoding(const char *string)
+{
+	int i;
+
+	for (i = 0 ; i < ARRAY_SIZE(f2fs_encoding_map); i++)
+		if (!strcmp(string, f2fs_encoding_map[i].name))
+			return f2fs_encoding_map[i].encoding_magic;
+
+	return -EINVAL;
+}
+
+int f2fs_get_encoding_flags(int encoding)
+{
+	int i;
+
+	for (i = 0 ; i < ARRAY_SIZE(f2fs_encoding_map); i++)
+		if (f2fs_encoding_map[i].encoding_magic == encoding)
+			return f2fs_encoding_map[encoding].default_flags;
+
+	return 0;
+}
+
+int f2fs_str2encoding_flags(char **param, __u16 *flags)
+{
+	char *f = strtok(*param, ",");
+	const struct enc_flags *fl;
+	int i, neg = 0;
+
+	while (f) {
+		neg = 0;
+		if (!strncmp("no", f, 2)) {
+			neg = 1;
+			f += 2;
+		}
+
+		for (i = 0; i < ARRAY_SIZE(encoding_flags); i++) {
+			fl = &encoding_flags[i];
+			if (!strcmp(fl->param, f)) {
+				if (neg) {
+					MSG(0, "Sub %s\n", fl->param);
+					*flags &= ~fl->flag;
+				} else {
+					MSG(0, "Add %s\n", fl->param);
+					*flags |= fl->flag;
+				}
+
+				goto next_flag;
+			}
+		}
+		*param = f;
+		return -EINVAL;
+	next_flag:
+		f = strtok(NULL, ":");
+	}
+	return 0;
 }
