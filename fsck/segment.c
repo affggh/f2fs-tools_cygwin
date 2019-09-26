@@ -16,26 +16,44 @@
 #include "fsck.h"
 #include "node.h"
 
-static void write_inode(u64 blkaddr, struct f2fs_node *inode)
-{
-	if (c.feature & cpu_to_le32(F2FS_FEATURE_INODE_CHKSUM))
-		inode->i.i_inode_checksum =
-			cpu_to_le32(f2fs_inode_chksum(inode));
-	ASSERT(dev_write_block(inode, blkaddr) >= 0);
-}
-
-void reserve_new_block(struct f2fs_sb_info *sbi, block_t *to,
-			struct f2fs_summary *sum, int type)
+int reserve_new_block(struct f2fs_sb_info *sbi, block_t *to,
+			struct f2fs_summary *sum, int type, bool is_inode)
 {
 	struct f2fs_fsck *fsck = F2FS_FSCK(sbi);
 	struct seg_entry *se;
 	u64 blkaddr, offset;
 	u64 old_blkaddr = *to;
+	bool is_node = IS_NODESEG(type);
+
+	if (old_blkaddr == NULL_ADDR) {
+		if (c.func == FSCK) {
+			if (fsck->chk.valid_blk_cnt >= sbi->user_block_count) {
+				ERR_MSG("Not enough space\n");
+				return -ENOSPC;
+			}
+			if (is_node && fsck->chk.valid_node_cnt >=
+					sbi->total_valid_node_count) {
+				ERR_MSG("Not enough space for node block\n");
+				return -ENOSPC;
+			}
+		} else {
+			if (sbi->total_valid_block_count >=
+						sbi->user_block_count) {
+				ERR_MSG("Not enough space\n");
+				return -ENOSPC;
+			}
+			if (is_node && sbi->total_valid_node_count >=
+						sbi->total_node_count) {
+				ERR_MSG("Not enough space for node block\n");
+				return -ENOSPC;
+			}
+		}
+	}
 
 	blkaddr = SM_I(sbi)->main_blkaddr;
 
 	if (find_next_free_block(sbi, &blkaddr, 0, type)) {
-		ERR_MSG("Not enough space to allocate blocks");
+		ERR_MSG("Can't find free block");
 		ASSERT(0);
 	}
 
@@ -44,6 +62,11 @@ void reserve_new_block(struct f2fs_sb_info *sbi, block_t *to,
 	se->type = type;
 	se->valid_blocks++;
 	f2fs_set_bit(offset, (char *)se->cur_valid_map);
+	if (!is_set_ckpt_flags(F2FS_CKPT(sbi), CP_UMOUNT_FLAG)) {
+		se->ckpt_type = type;
+		se->ckpt_valid_blocks++;
+		f2fs_set_bit(offset, (char *)se->ckpt_valid_map);
+	}
 	if (c.func == FSCK) {
 		f2fs_set_main_bitmap(sbi, blkaddr, type);
 		f2fs_set_sit_bitmap(sbi, blkaddr);
@@ -51,14 +74,27 @@ void reserve_new_block(struct f2fs_sb_info *sbi, block_t *to,
 
 	if (old_blkaddr == NULL_ADDR) {
 		sbi->total_valid_block_count++;
-		if (c.func == FSCK)
+		if (is_node) {
+			sbi->total_valid_node_count++;
+			if (is_inode)
+				sbi->total_valid_inode_count++;
+		}
+		if (c.func == FSCK) {
 			fsck->chk.valid_blk_cnt++;
+			if (is_node) {
+				fsck->chk.valid_node_cnt++;
+				if (is_inode)
+					fsck->chk.valid_inode_cnt++;
+			}
+		}
 	}
 	se->dirty = 1;
 
 	/* read/write SSA */
 	*to = (block_t)blkaddr;
 	update_sum_entry(sbi, *to, sum);
+
+	return 0;
 }
 
 int new_data_block(struct f2fs_sb_info *sbi, void *block,
@@ -67,19 +103,18 @@ int new_data_block(struct f2fs_sb_info *sbi, void *block,
 	struct f2fs_summary sum;
 	struct node_info ni;
 	unsigned int blkaddr = datablock_addr(dn->node_blk, dn->ofs_in_node);
-	struct f2fs_checkpoint *cp = F2FS_CKPT(sbi);
-
-	if (!is_set_ckpt_flags(cp, CP_UMOUNT_FLAG)) {
-		c.alloc_failed = 1;
-		return -EINVAL;
-	}
+	int ret;
 
 	ASSERT(dn->node_blk);
 	memset(block, 0, BLOCK_SZ);
 
 	get_node_info(sbi, dn->nid, &ni);
 	set_summary(&sum, dn->nid, dn->ofs_in_node, ni.version);
-	reserve_new_block(sbi, &dn->data_blkaddr, &sum, type);
+	ret = reserve_new_block(sbi, &dn->data_blkaddr, &sum, type, 0);
+	if (ret) {
+		c.alloc_failed = 1;
+		return ret;
+	}
 
 	if (blkaddr == NULL_ADDR)
 		inc_inode_blocks(dn);
@@ -256,7 +291,7 @@ u64 f2fs_write(struct f2fs_sb_info *sbi, nid_t ino, u8 *buffer,
 	}
 	if (idirty) {
 		ASSERT(inode == dn.inode_blk);
-		write_inode(ni.blk_addr, inode);
+		ASSERT(write_inode(inode, ni.blk_addr) >= 0);
 	}
 	if (index_node)
 		free(index_node);
@@ -281,7 +316,7 @@ void f2fs_filesize_update(struct f2fs_sb_info *sbi, nid_t ino, u64 filesize)
 
 	inode->i.i_size = cpu_to_le64(filesize);
 
-	write_inode(ni.blk_addr, inode);
+	ASSERT(write_inode(inode, ni.blk_addr) >= 0);
 	free(inode);
 }
 
@@ -326,7 +361,7 @@ int f2fs_build_file(struct f2fs_sb_info *sbi, struct dentry *de)
 		ASSERT((unsigned long)n == de->size);
 		memcpy(inline_data_addr(node_blk), buffer, de->size);
 		node_blk->i.i_size = cpu_to_le64(de->size);
-		write_inode(ni.blk_addr, node_blk);
+		ASSERT(write_inode(node_blk, ni.blk_addr) >= 0);
 		free(node_blk);
 	} else {
 		while ((n = read(fd, buffer, BLOCK_SZ)) > 0) {

@@ -38,40 +38,56 @@ struct f2fs_checkpoint *cp;
 static unsigned int quotatype_bits = 0;
 
 const char *media_ext_lists[] = {
-	"jpg",
-	"gif",
-	"png",
+	/* common prefix */
+	"mp", // Covers mp3, mp4, mpeg, mpg
+	"wm", // Covers wma, wmb, wmv
+	"og", // Covers oga, ogg, ogm, ogv
+	"jp", // Covers jpg, jpeg, jp2
+
+	/* video */
 	"avi",
-	"divx",
-	"m4a",
 	"m4v",
 	"m4p",
-	"mp4",
-	"mp3",
-	"3gp",
-	"wmv",
-	"wma",
-	"mpeg",
 	"mkv",
 	"mov",
-	"asx",
-	"asf",
-	"wmx",
-	"svi",
-	"wvx",
-	"wv",
-	"wm",
-	"mpg",
-	"mpe",
-	"rm",
-	"ogg",
+	"webm",
+
+	/* audio */
+	"wav",
+	"m4a",
+	"3gp",
 	"opus",
 	"flac",
-	"jpeg",
-	"video",
-	"apk",	/* for android system */
-	"so",	/* for android system */
+
+	/* image */
+	"gif",
+	"png",
+	"svg",
+	"webp",
+
+	/* archives */
+	"jar",
+	"deb",
+	"iso",
+	"gz",
+	"xz",
+	"zst",
+
+	/* others */
+	"pdf",
+	"pyc", // Python bytecode
+	"ttc",
+	"ttf",
 	"exe",
+
+	/* android */
+	"apk",
+	"cnt", // Image alias
+	"exo", // YouTube
+	"odex", // Android RunTime
+	"vdex", // Android RunTime
+	"so",
+
 	NULL
 };
 
@@ -130,7 +146,7 @@ static void cure_extension_list(void)
 		ue = strtok(ext_str, ", ");
 		while (ue != NULL) {
 			name_len = strlen(ue);
-			if (name_len >= 8) {
+			if (name_len >= F2FS_EXTENSION_LEN) {
 				MSG(0, "\tWarn: Extension name (%s) is too long\n", ue);
 				goto next;
 			}
@@ -499,6 +515,15 @@ static int f2fs_prepare_super_block(void)
 
 	memcpy(sb->version, c.version, VERSION_LEN);
 	memcpy(sb->init_version, c.version, VERSION_LEN);
+
+	if (c.feature & cpu_to_le32(F2FS_FEATURE_CASEFOLD)) {
+		if (c.feature & cpu_to_le32(F2FS_FEATURE_ENCRYPT)) {
+			MSG(0, "\tError: Casefolding and encryption are not compatible\n");
+			return -1;
+		}
+		set_sb(s_encoding, c.s_encoding);
+		set_sb(s_encoding_flags, c.s_encoding_flags);
+	}
 
 	sb->feature = c.feature;
 
@@ -1133,10 +1158,6 @@ static int f2fs_write_root_inode(void)
 	raw_node->i.i_ext.blk_addr = 0;
 	raw_node->i.i_ext.len = 0;
 
-	if (c.feature & cpu_to_le32(F2FS_FEATURE_INODE_CHKSUM))
-		raw_node->i.i_inode_checksum =
-			cpu_to_le32(f2fs_inode_chksum(raw_node));
-
 	main_area_node_seg_blk_offset = get_sb(main_blkaddr);
 	main_area_node_seg_blk_offset += c.cur_seg[CURSEG_HOT_NODE] *
 					c.blks_per_seg;
@@ -1145,7 +1166,7 @@ static int f2fs_write_root_inode(void)
 			get_sb(main_blkaddr),
 			c.cur_seg[CURSEG_HOT_NODE],
 			c.blks_per_seg, main_area_node_seg_blk_offset);
-	if (dev_write_block(raw_node, main_area_node_seg_blk_offset)) {
+	if (write_inode(raw_node, main_area_node_seg_blk_offset) < 0) {
 		MSG(1, "\tError: While writing the raw_node to disk!!!\n");
 		free(raw_node);
 		return -1;
@@ -1304,10 +1325,6 @@ static int f2fs_write_qf_inode(int qtype)
 	raw_node->i.i_ext.blk_addr = 0;
 	raw_node->i.i_ext.len = 0;
 
-	if (c.feature & cpu_to_le32(F2FS_FEATURE_INODE_CHKSUM))
-		raw_node->i.i_inode_checksum =
-			cpu_to_le32(f2fs_inode_chksum(raw_node));
-
 	main_area_node_seg_blk_offset = get_sb(main_blkaddr);
 	main_area_node_seg_blk_offset += c.cur_seg[CURSEG_HOT_NODE] *
 					c.blks_per_seg + qtype + 1;
@@ -1316,7 +1333,7 @@ static int f2fs_write_qf_inode(int qtype)
 			get_sb(main_blkaddr),
 			c.cur_seg[CURSEG_HOT_NODE],
 			c.blks_per_seg, main_area_node_seg_blk_offset);
-	if (dev_write_block(raw_node, main_area_node_seg_blk_offset)) {
+	if (write_inode(raw_node, main_area_node_seg_blk_offset) < 0) {
 		MSG(1, "\tError: While writing the raw_node to disk!!!\n");
 		free(raw_node);
 		return -1;
@@ -1491,10 +1508,6 @@ static int f2fs_write_lpf_inode(void)
 	}
 	raw_node->i.i_addr[get_extra_isize(raw_node)] = cpu_to_le32(data_blk_nor);
 
-	if (c.feature & cpu_to_le32(F2FS_FEATURE_INODE_CHKSUM))
-		raw_node->i.i_inode_checksum =
-			cpu_to_le32(f2fs_inode_chksum(raw_node));
-
 	main_area_node_seg_blk_offset = get_sb(main_blkaddr);
 	main_area_node_seg_blk_offset += c.cur_seg[CURSEG_HOT_NODE] *
 		c.blks_per_seg + c.quota_inum + 1;
@@ -1503,7 +1516,7 @@ static int f2fs_write_lpf_inode(void)
 			get_sb(main_blkaddr),
 			c.cur_seg[CURSEG_HOT_NODE],
 			c.blks_per_seg, main_area_node_seg_blk_offset);
-	if (dev_write_block(raw_node, main_area_node_seg_blk_offset)) {
+	if (write_inode(raw_node, main_area_node_seg_blk_offset) < 0) {
 		MSG(1, "\tError: While writing the raw_node to disk!!!\n");
 		err = -1;
 		goto exit;
@@ -1544,7 +1557,7 @@ static int f2fs_add_default_dentry_root(void)
 
 	if (c.lpf_ino) {
 		int len = strlen(LPF);
-		f2fs_hash_t hash = f2fs_dentry_hash((unsigned char *)LPF, len);
+		f2fs_hash_t hash = f2fs_dentry_hash(0, 0, (unsigned char *)LPF, len);
 
 		dent_blk->dentry[2].hash_code = cpu_to_le32(hash);
 		dent_blk->dentry[2].ino = cpu_to_le32(c.lpf_ino);
