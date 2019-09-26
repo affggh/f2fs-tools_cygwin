@@ -45,6 +45,102 @@ struct cmd_desc {
 	int cmd_flags;
 };
 
+#define getflags_desc "getflags ioctl"
+#define getflags_help						\
+"f2fs_io getflags [file]\n\n"					\
+"get a flag given the file\n"					\
+"flag can show \n"						\
+"  casefold\n"							\
+"  compression\n"						\
+"  nocompression\n"
+
+static void do_getflags(int argc, char **argv, const struct cmd_desc *cmd)
+{
+	long flag;
+	int ret, fd;
+	int exist = 0;
+
+	if (argc != 2) {
+		fputs("Excess arguments\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	fd = open(argv[1], O_RDONLY);
+	if (fd == -1) {
+		fputs("Open failed\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	ret = ioctl(fd, F2FS_IOC_GETFLAGS, &flag);
+	printf("get a flag on %s ret=%d, flags=", argv[1], ret);
+	if (flag & FS_CASEFOLD_FL) {
+		printf("casefold");
+		exist = 1;
+	}
+	if (flag & FS_COMPR_FL) {
+		if (exist)
+			printf(",");
+		printf("compression");
+		exist = 1;
+	}
+	if (flag & FS_NOCOMP_FL) {
+		if (exist)
+			printf(",");
+		printf("nocompression");
+		exist = 1;
+	}
+	if (!exist)
+		printf("none");
+	printf("\n");
+	exit(0);
+}
+
+#define setflags_desc "setflags ioctl"
+#define setflags_help						\
+"f2fs_io setflags [flag] [file]\n\n"				\
+"set a flag given the file\n"					\
+"flag can be\n"							\
+"  casefold\n"							\
+"  compression\n"						\
+"  nocompression\n"
+
+static void do_setflags(int argc, char **argv, const struct cmd_desc *cmd)
+{
+	long flag;
+	int ret, fd;
+
+	if (argc != 3) {
+		fputs("Excess arguments\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	fd = open(argv[2], O_RDONLY);
+	if (fd == -1) {
+		fputs("Open failed\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	ret = ioctl(fd, F2FS_IOC_GETFLAGS, &flag);
+	printf("get a flag on %s ret=%d, flags=%lx\n", argv[1], ret, flag);
+	if (ret)
+		exit(1);
+
+	if (!strcmp(argv[1], "casefold"))
+		flag |= FS_CASEFOLD_FL;
+	else if (!strcmp(argv[1], "compression"))
+		flag |= FS_COMPR_FL;
+	else if (!strcmp(argv[1], "nocompression"))
+		flag |= FS_NOCOMP_FL;
+
+	ret = ioctl(fd, F2FS_IOC_SETFLAGS, &flag);
+	printf("set a flag on %s ret=%d, flags=%s\n", argv[2], ret, argv[1]);
+	exit(0);
+}
+
 #define shutdown_desc "shutdown filesystem"
 #define shutdown_help					\
 "f2fs_io shutdown [level] [dir]\n\n"			\
@@ -141,6 +237,50 @@ static void do_pinfile(int argc, char **argv, const struct cmd_desc *cmd)
 	exit(0);
 }
 
+#define fallocate_desc "fallocate"
+#define fallocate_help						\
+"f2fs_io fallocate [keep_size] [offset] [length] [file]\n\n"	\
+"fallocate given the file\n"					\
+" [keep_size] : 1 or 0\n"					\
+
+static void do_fallocate(int argc, char **argv, const struct cmd_desc *cmd)
+{
+	int fd;
+	off_t offset, length;
+	struct stat sb;
+	int mode = 0;
+
+	if (argc != 5) {
+		fputs("Excess arguments\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	if (!strcmp(argv[1], "1"))
+		mode |= FALLOC_FL_KEEP_SIZE;
+
+	offset = atoi(argv[2]);
+	length = atoi(argv[3]);
+
+	fd = open(argv[4], O_RDWR);
+	if (fd == -1) {
+		fputs("Open failed\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	if (fallocate(fd, mode, offset, length)) {
+		fputs("fallocate failed\n\n", stderr);
+		exit(1);
+	}
+	if (fstat(fd, &sb) == -1) {
+		fputs("Stat failed\n\n", stderr);
+		exit(1);
+	}
+	printf("fallocated a file: i_size=%"PRIu64", i_blocks=%"PRIu64"\n", sb.st_size, sb.st_blocks);
+	exit(0);
+}
+
 #define write_desc "write data into file"
 #define write_help					\
 "f2fs_io write [chunk_size in 4kb] [offset in chunk_size] [count] [pattern] [IO] [file_path]\n\n"	\
@@ -194,9 +334,9 @@ static void do_write(int argc, char **argv, const struct cmd_desc *cmd)
 		exit(1);
 	}
 
-	if (!strcmp(argv[5], "buffered")) {
+	if (!strcmp(argv[5], "dio")) {
 		flags |= O_DIRECT;
-	} else if (strcmp(argv[5], "dio")) {
+	} else if (strcmp(argv[5], "buffered")) {
 		fputs("Wrong IO type\n\n", stderr);
 		exit(1);
 	}
@@ -263,9 +403,9 @@ static void do_read(int argc, char **argv, const struct cmd_desc *cmd)
 		exit(1);
 	}
 	count = atoi(argv[3]);
-	if (!strcmp(argv[4], "buffered")) {
+	if (!strcmp(argv[4], "dio")) {
 		flags |= O_DIRECT;
-	} else if (strcmp(argv[4], "dio")) {
+	} else if (strcmp(argv[4], "buffered")) {
 		fputs("Wrong IO type\n\n", stderr);
 		exit(1);
 	}
@@ -398,6 +538,45 @@ static void do_gc_urgent(int argc, char **argv, const struct cmd_desc *cmd)
 	}
 }
 
+#define defrag_file_desc "do defragment on file"
+#define defrag_file_help						\
+"f2fs_io defrag_file [start] [length] [file_path]\n\n"		\
+"  start     : start offset of defragment region, unit: bytes\n"	\
+"  length    : bytes number of defragment region\n"			\
+
+static void do_defrag_file(int argc, char **argv, const struct cmd_desc *cmd)
+{
+	struct f2fs_defragment df;
+	u64 len;
+	int ret, fd;
+
+	if (argc != 4) {
+		fputs("Excess arguments\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	df.start = atoll(argv[1]);
+	df.len = len = atoll(argv[2]);
+
+	fd = open(argv[3], O_RDWR);
+	if (fd == -1) {
+		fputs("Open failed\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	ret = ioctl(fd, F2FS_IOC_DEFRAGMENT, &df);
+	if (ret < 0) {
+		perror("F2FS_IOC_DEFRAGMENT");
+		exit(1);
+	}
+	printf("defrag %s in region[%"PRIu64", %"PRIu64"]\n",
+			argv[3], df.start, df.start + len);
+	exit(0);
+}
+
+
 #define CMD_HIDDEN 	0x0001
 #define CMD(name) { #name, do_##name, name##_desc, name##_help, 0 }
 #define _CMD(name) { #name, do_##name, NULL, NULL, CMD_HIDDEN }
@@ -405,12 +584,16 @@ static void do_gc_urgent(int argc, char **argv, const struct cmd_desc *cmd)
 static void do_help(int argc, char **argv, const struct cmd_desc *cmd);
 const struct cmd_desc cmd_list[] = {
 	_CMD(help),
+	CMD(getflags),
+	CMD(setflags),
 	CMD(shutdown),
 	CMD(pinfile),
+	CMD(fallocate),
 	CMD(write),
 	CMD(read),
 	CMD(fiemap),
 	CMD(gc_urgent),
+	CMD(defrag_file),
 	{ NULL, NULL, NULL, NULL, 0 }
 };
 

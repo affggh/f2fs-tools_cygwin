@@ -8,6 +8,7 @@
  */
 #define _LARGEFILE64_SOURCE
 
+#include <f2fs_fs.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,12 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#ifdef HAVE_SYS_SYSMACROS_H
+#include <sys/sysmacros.h>
+#endif
+#ifdef HAVE_LINUX_LIMITS_H
+#include <linux/limits.h>
+#endif
 #ifndef ANDROID_WINDOWS_HOST
 #include <sys/ioctl.h>
 #endif
@@ -24,55 +31,137 @@
 
 #ifdef HAVE_LINUX_BLKZONED_H
 
-void f2fs_get_zoned_model(int i)
+int get_sysfs_path(struct device_info *dev, const char *attr,
+		   char *buf, size_t buflen)
+{
+	struct stat statbuf;
+	char str[PATH_MAX];
+	char sysfs_path[PATH_MAX];
+	ssize_t len;
+	char *delim;
+	int ret;
+
+	if (stat(dev->path, &statbuf) < 0)
+		return -1;
+
+	snprintf(str, sizeof(str), "/sys/dev/block/%d:%d",
+		 major(statbuf.st_rdev), minor(statbuf.st_rdev));
+	len = readlink(str, buf, buflen - 1);
+	if (len < 0)
+		return -1;
+	buf[len] = '\0';
+
+	ret = snprintf(sysfs_path, sizeof(sysfs_path),
+		       "/sys/dev/block/%s", buf);
+	if (ret >= sizeof(sysfs_path))
+		return -1;
+
+	/* Test if the device is a partition */
+	ret = snprintf(str, sizeof(str), "%s/partition", sysfs_path);
+	if (ret >= sizeof(str))
+		return -1;
+	ret = stat(str, &statbuf);
+	if (ret) {
+		if (errno == ENOENT) {
+			/* Not a partition */
+			goto out;
+		}
+		return -1;
+	}
+
+	/*
+	 * The device is a partition: remove the device name from the
+	 * attribute file path to obtain the sysfs path of the holder device.
+	 *   e.g.:  /sys/dev/block/.../sda/sda1 -> /sys/dev/block/.../sda
+	 */
+	delim = strrchr(sysfs_path, '/');
+	if (!delim)
+		return -1;
+	*delim = '\0';
+
+out:
+	ret = snprintf(buf, buflen, "%s/%s", sysfs_path, attr);
+	if (ret >= buflen)
+		return -1;
+
+	return 0;
+}
+
+int f2fs_get_zoned_model(int i)
 {
 	struct device_info *dev = c.devices + i;
-	char str[128];
+	char str[PATH_MAX];
 	FILE *file;
 	int res;
 
 	/* Check that this is a zoned block device */
-	snprintf(str, sizeof(str),
-		 "/sys/block/%s/queue/zoned",
-		 basename(dev->path));
+	res = get_sysfs_path(dev, "queue/zoned", str, sizeof(str));
+	if (res != 0) {
+		MSG(0, "\tError: Failed to get device sysfs path\n");
+		return -1;
+	}
+
 	file = fopen(str, "r");
-	if (!file)
-		goto not_zoned;
+	if (!file) {
+		/*
+		 * The kernel does not support zoned block devices, but we have
+		 * a block device file. This means that if the zoned file is
+		 * not found, then the device is not zoned or is zoned but can
+		 * be randomly written (i.e. host-aware zoned model).
+		 * Treat the device as a regular block device. Otherwise, signal
+		 * the failure to verify the disk zone model.
+		 */
+		if (errno == ENOENT) {
+			dev->zoned_model = F2FS_ZONED_NONE;
+			return 0;
+		}
+		MSG(0, "\tError: Failed to check the device zoned model\n");
+		return -1;
+	}
 
 	memset(str, 0, sizeof(str));
 	res = fscanf(file, "%s", str);
 	fclose(file);
 
-	if (res != 1)
-		goto not_zoned;
+	if (res != 1) {
+		MSG(0, "\tError: Failed to parse the device zoned model\n");
+		return -1;
+	}
 
-	if (strcmp(str, "host-aware") == 0) {
+	if (strcmp(str, "none") == 0) {
+		/* Regular block device */
+		dev->zoned_model = F2FS_ZONED_NONE;
+	} else if (strcmp(str, "host-aware") == 0) {
+		/* Host-aware zoned block device: can be randomly written */
 		dev->zoned_model = F2FS_ZONED_HA;
-		return;
-	}
-	if (strcmp(str, "host-managed") == 0) {
+	} else if (strcmp(str, "host-managed") == 0) {
+		/* Host-managed zoned block device: sequential writes needed */
 		dev->zoned_model = F2FS_ZONED_HM;
-		return;
+	} else {
+		MSG(0, "\tError: Unsupported device zoned model\n");
+		return -1;
 	}
 
-not_zoned:
-	dev->zoned_model = F2FS_ZONED_NONE;
+	return 0;
 }
 
 int f2fs_get_zone_blocks(int i)
 {
 	struct device_info *dev = c.devices + i;
 	uint64_t sectors;
-	char str[128];
+	char str[PATH_MAX];
 	FILE *file;
 	int res;
 
 	/* Get zone size */
 	dev->zone_blocks = 0;
 
-	snprintf(str, sizeof(str),
-		 "/sys/block/%s/queue/chunk_sectors",
-		 basename(dev->path));
+	res = get_sysfs_path(dev, "queue/chunk_sectors", str, sizeof(str));
+	if (res != 0) {
+		MSG(0, "\tError: Failed to get device sysfs attribute path\n");
+		return -1;
+	}
+
 	file = fopen(str, "r");
 	if (!file)
 		return -1;
@@ -202,7 +291,14 @@ int f2fs_check_zones(int j)
 		goto out;
 	}
 
-	if (dev->zoned_model == F2FS_ZONED_HM &&
+	/*
+	 * For a multi-device volume, fixed position metadata blocks are
+	 * stored * only on the first device of the volume. Checking for the
+	 * presence of * conventional zones (randomly writeabl zones) for
+	 * storing these blocks * on a host-managed device is thus needed only
+	 * for the device index 0.
+	 */
+	if (j == 0 && dev->zoned_model == F2FS_ZONED_HM &&
 			!dev->nr_rnd_zones) {
 		ERR_MSG("No conventional zone for super block\n");
 		ret = -1;
@@ -276,12 +372,13 @@ out:
 
 #else
 
-void f2fs_get_zoned_model(int i)
+int f2fs_get_zoned_model(int i)
 {
 	struct device_info *dev = c.devices + i;
 
 	c.zoned_mode = 0;
 	dev->zoned_model = F2FS_ZONED_NONE;
+	return 0;
 }
 
 int f2fs_get_zone_blocks(int i)
