@@ -11,7 +11,7 @@ third_party {
   version: "v1.13.0"
   last_upgrade_date {
     year: 2019
-    month: 9
-    day: 25
+    month: 10
+    day: 18
   }
 }
