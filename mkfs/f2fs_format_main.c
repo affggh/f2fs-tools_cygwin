@@ -241,6 +241,11 @@ static void f2fs_parse_options(int argc, char *argv[])
 				"enabled with extra attr feature\n");
 			exit(1);
 		}
+		if (c.feature & cpu_to_le32(F2FS_FEATURE_COMPRESSION)) {
+			MSG(0, "\tInfo: compression feature should always be "
+				"enabled with extra attr feature\n");
+			exit(1);
+		}
 	}
 
 	if (optind >= argc) {
@@ -361,7 +366,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (f2fs_get_device_info() < 0)
-		return -1;
+		goto err_format;
 
 	/*
 	 * Some options are mandatory for host-managed
@@ -369,26 +374,25 @@ int main(int argc, char *argv[])
 	 */
 	if (c.zoned_model == F2FS_ZONED_HM && !c.zoned_mode) {
 		MSG(0, "\tError: zoned block device feature is required\n");
-		return -1;
+		goto err_format;
 	}
 
 	if (c.zoned_mode && !c.trim) {
 		MSG(0, "\tError: Trim is required for zoned block devices\n");
-		return -1;
-	}
-
-	if (c.sparse_mode) {
-		if (f2fs_init_sparse_file())
-			return -1;
+		goto err_format;
 	}
 
 	if (f2fs_format_device() < 0)
-		return -1;
+		goto err_format;
 
 	if (f2fs_finalize_device() < 0)
-		return -1;
+		goto err_format;
 
 	MSG(0, "Info: format successful\n");
 
 	return 0;
+
+err_format:
+	f2fs_release_sparse_resource();
+	return -1;
 }

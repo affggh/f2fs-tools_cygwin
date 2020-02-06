@@ -3,6 +3,8 @@
  *
  * Copyright (c) 2012 Samsung Electronics Co., Ltd.
  *             http://www.samsung.com/
+ * Copyright (c) 2019 Google Inc.
+ *             http://www.google.com/
  *
  * Dual licensed under the GPL or LGPL version 2 licenses.
  *
@@ -332,6 +334,16 @@ struct device_info {
 	size_t zone_blocks;
 };
 
+typedef struct {
+	/* Value 0 means no cache, minimum 1024 */
+	long num_cache_entry;
+
+	/* Value 0 means always overwrite (no collision allowed). maximum 16 */
+	unsigned max_hash_collision;
+
+	bool dbg_en;
+} dev_cache_config_t;
+
 struct f2fs_configuration {
 	u_int32_t reserved_segments;
 	u_int32_t new_reserved_segments;
@@ -375,6 +387,7 @@ struct f2fs_configuration {
 	int func;
 	void *private;
 	int dry_run;
+	int no_kernel_check;
 	int fix_on;
 	int force;
 	int defset;
@@ -422,6 +435,9 @@ struct f2fs_configuration {
 
 	/* precomputed fs UUID checksum for seeding other checksums */
 	u_int32_t chksum_seed;
+
+	/* cache parameters */
+	dev_cache_config_t cache_config;
 };
 
 #ifdef CONFIG_64BIT
@@ -558,6 +574,7 @@ enum {
 
 #define NULL_ADDR		0x0U
 #define NEW_ADDR		-1U
+#define COMPRESS_ADDR		-2U
 
 #define F2FS_ROOT_INO(sbi)	(sbi->root_ino_num)
 #define F2FS_NODE_INO(sbi)	(sbi->node_ino_num)
@@ -598,6 +615,7 @@ enum {
 #define F2FS_FEATURE_VERITY		0x0400	/* reserved */
 #define F2FS_FEATURE_SB_CHKSUM		0x0800
 #define F2FS_FEATURE_CASEFOLD		0x1000
+ #define F2FS_FEATURE_COMPRESSION	0x2000
 
 #define MAX_VOLUME_NAME		512
 
@@ -751,7 +769,8 @@ struct f2fs_extent {
 #define CUR_ADDRS_PER_INODE(inode)	(DEF_ADDRS_PER_INODE - \
 					__get_extra_isize(inode))
 #define ADDRS_PER_INODE(i)	addrs_per_inode(i)
-#define ADDRS_PER_BLOCK         1018	/* Address Pointers in a Direct Block */
+#define DEF_ADDRS_PER_BLOCK	1018	/* Address Pointers in a Direct Block */
+#define ADDRS_PER_BLOCK(i)	addrs_per_block(i)
 #define NIDS_PER_BLOCK          1018	/* Node IDs in an Indirect Block */
 
 #define	NODE_DIR1_BLOCK		(DEF_ADDRS_PER_INODE + 1)
@@ -811,6 +830,10 @@ struct f2fs_extent {
 #define F2FS_CASEFOLD_FL	0x40000000 /* Casefolded file */
 #define IS_CASEFOLDED(dir)     ((dir)->i_flags & F2FS_CASEFOLD_FL)
 
+/*
+ * inode flags
+ */
+#define F2FS_COMPR_FL		0x00000004 /* Compress file */
 struct f2fs_inode {
 	__le16 i_mode;			/* file mode */
 	__u8 i_advise;			/* file hints */
@@ -851,6 +874,10 @@ struct f2fs_inode {
 			__le32 i_inode_checksum;/* inode meta checksum */
 			__le64 i_crtime;	/* creation time */
 			__le32 i_crtime_nsec;	/* creation time in nano scale */
+			__le64 i_compr_blocks;	/* # of compressed blocks */
+			__u8 i_compress_algrithm;	/* compress algrithm */
+			__u8 i_log_cluster_size;	/* log of cluster size */
+			__le16 i_padding;		/* padding */
 			__le32 i_extra_end[0];	/* for attribute size calculation */
 		} __attribute__((packed));
 		__le32 i_addr[DEF_ADDRS_PER_INODE];	/* Pointers to data blocks */
@@ -861,7 +888,7 @@ struct f2fs_inode {
 
 
 struct direct_node {
-	__le32 addr[ADDRS_PER_BLOCK];	/* array of data block address */
+	__le32 addr[DEF_ADDRS_PER_BLOCK];	/* array of data block address */
 } __attribute__((packed));
 
 struct indirect_node {
@@ -1160,6 +1187,7 @@ extern int utf8_to_utf16(u_int16_t *, const char *, size_t, size_t);
 extern int utf16_to_utf8(char *, const u_int16_t *, size_t, size_t);
 extern int log_base_2(u_int32_t);
 extern unsigned int addrs_per_inode(struct f2fs_inode *);
+extern unsigned int addrs_per_block(struct f2fs_inode *);
 extern __u32 f2fs_inode_chksum(struct f2fs_node *);
 extern __u32 f2fs_checkpoint_chksum(struct f2fs_checkpoint *);
 extern int write_inode(struct f2fs_node *, u64);
@@ -1185,8 +1213,12 @@ extern int f2fs_get_device_info(void);
 extern unsigned int calc_extra_isize(void);
 extern int get_device_info(int);
 extern int f2fs_init_sparse_file(void);
+extern void f2fs_release_sparse_resource(void);
 extern int f2fs_finalize_device(void);
 extern int f2fs_fsync_device(void);
+
+extern void dcache_init(void);
+extern void dcache_release(void);
 
 extern int dev_read(void *, __u64, size_t);
 #ifdef POSIX_FADV_WILLNEED
@@ -1397,6 +1429,7 @@ struct feature feature_table[] = {					\
 	{ "verity",			F2FS_FEATURE_VERITY },	/* reserved */ \
 	{ "sb_checksum",		F2FS_FEATURE_SB_CHKSUM },	\
 	{ "casefold",			F2FS_FEATURE_CASEFOLD },	\
+	{ "compression",		F2FS_FEATURE_COMPRESSION },	\
 	{ NULL,				0x0},				\
 };
 

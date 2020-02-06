@@ -228,18 +228,26 @@ void print_inode_info(struct f2fs_sb_info *sbi,
 			DISP_u64(inode, i_crtime);
 			DISP_u32(inode, i_crtime_nsec);
 		}
+		if (c.feature & cpu_to_le32(F2FS_FEATURE_COMPRESSION)) {
+			DISP_u64(inode, i_compr_blocks);
+			DISP_u32(inode, i_compress_algrithm);
+			DISP_u32(inode, i_log_cluster_size);
+			DISP_u32(inode, i_padding);
+		}
 	}
 
-	DISP_u32(inode, i_addr[ofs]);		/* Pointers to data blocks */
-	DISP_u32(inode, i_addr[ofs + 1]);	/* Pointers to data blocks */
-	DISP_u32(inode, i_addr[ofs + 2]);	/* Pointers to data blocks */
-	DISP_u32(inode, i_addr[ofs + 3]);	/* Pointers to data blocks */
+	for (i = ofs; i < ADDRS_PER_INODE(inode); i++) {
+		block_t blkaddr = le32_to_cpu(inode->i_addr[i]);
+		char *flag = "";
 
-	for (i = ofs + 3; i < ADDRS_PER_INODE(inode); i++) {
-		if (inode->i_addr[i] == 0x0)
-			break;
-		printf("i_addr[0x%x] points data block\t\t[0x%4x]\n",
-				i, le32_to_cpu(inode->i_addr[i]));
+		if (blkaddr == 0x0)
+			continue;
+		if (blkaddr == COMPRESS_ADDR)
+			flag = "cluster flag";
+		else if (blkaddr == NEW_ADDR)
+			flag = "reserved flag";
+		printf("i_addr[0x%x] %-16s\t\t[0x%8x : %u]\n", i, flag,
+				blkaddr, blkaddr);
 	}
 
 	DISP_u32(inode, i_nid[0]);	/* direct */
@@ -272,7 +280,7 @@ void print_node_info(struct f2fs_sb_info *sbi,
 		DBG(verbose,
 			"Node ID [0x%x:%u] is direct node or indirect node.\n",
 								nid, nid);
-		for (i = 0; i <= 10; i++)
+		for (i = 0; i < DEF_ADDRS_PER_BLOCK; i++)
 			MSG(verbose, "[%d]\t\t\t[0x%8x : %d]\n",
 						i, dump_blk[i], dump_blk[i]);
 	}
@@ -470,6 +478,9 @@ void print_sb_state(struct f2fs_super_block *sb)
 	if (f & cpu_to_le32(F2FS_FEATURE_CASEFOLD)) {
 		MSG(0, "%s", " casefold");
 	}
+	if (f & cpu_to_le32(F2FS_FEATURE_COMPRESSION)) {
+		MSG(0, "%s", " compression");
+	}
 	MSG(0, "\n");
 	MSG(0, "Info: superblock encrypt level = %d, salt = ",
 					sb->encryption_level);
@@ -480,7 +491,8 @@ void print_sb_state(struct f2fs_super_block *sb)
 
 static inline bool is_valid_data_blkaddr(block_t blkaddr)
 {
-	if (blkaddr == NEW_ADDR || blkaddr == NULL_ADDR)
+	if (blkaddr == NEW_ADDR || blkaddr == NULL_ADDR ||
+				blkaddr == COMPRESS_ADDR)
 		return 0;
 	return 1;
 }
@@ -872,7 +884,8 @@ int validate_super_block(struct f2fs_sb_info *sbi, enum SB_ADDR sb_addr)
 		MSG(0, "Info: MKFS version\n  \"%s\"\n", c.init_version);
 		MSG(0, "Info: FSCK version\n  from \"%s\"\n    to \"%s\"\n",
 					c.sb_version, c.version);
-		if (memcmp(c.sb_version, c.version, VERSION_LEN)) {
+		if (!c.no_kernel_check &&
+				memcmp(c.sb_version, c.version, VERSION_LEN)) {
 			memcpy(sbi->raw_super->version,
 						c.version, VERSION_LEN);
 			update_superblock(sbi->raw_super, SB_MASK(sb_addr));
@@ -3214,7 +3227,7 @@ static int do_record_fsync_data(struct f2fs_sb_info *sbi,
 
 	/* step 3: recover data indices */
 	start = start_bidx_of_node(ofs_of_node(node_blk), node_blk);
-	end = start + ADDRS_PER_PAGE(node_blk);
+	end = start + ADDRS_PER_PAGE(sbi, node_blk, NULL);
 
 	for (; start < end; start++, ofs_in_node++) {
 		blkaddr = datablock_addr(node_blk, ofs_in_node);
