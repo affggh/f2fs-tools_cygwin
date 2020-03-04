@@ -199,7 +199,10 @@ cc_binary {
 cc_binary {
     name: "check_f2fs",
     host_supported: false,
-    cflags: ["--static"],
+    cflags: [
+        "--static",
+        "-U_FORTIFY_SOURCE",
+    ],
     srcs: ["tools/check_f2fs.c"],
     product_specific: true,
 }
