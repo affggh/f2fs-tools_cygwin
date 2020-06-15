@@ -130,6 +130,30 @@ static void full_write(int fd, const void *buf, size_t count)
 	}
 }
 
+#define fsync_desc "fsync"
+#define fsync_help						\
+"f2fs_io fsync [file]\n\n"					\
+"fsync given the file\n"					\
+
+static void do_fsync(int argc, char **argv, const struct cmd_desc *cmd)
+{
+	int fd;
+
+	if (argc != 2) {
+		fputs("Excess arguments\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	fd = xopen(argv[1], O_WRONLY, 0);
+
+	if (fsync(fd) != 0)
+		die_errno("fsync failed");
+
+	printf("fsync a file\n");
+	exit(0);
+}
+
 #define set_verity_desc "Set fs-verity"
 #define set_verity_help					\
 "f2fs_io set_verity [file]\n\n"				\
@@ -162,13 +186,17 @@ static void do_set_verity(int argc, char **argv, const struct cmd_desc *cmd)
 "f2fs_io getflags [file]\n\n"					\
 "get a flag given the file\n"					\
 "flag can show \n"						\
+"  encryption\n"						\
+"  nocow(pinned)\n"						\
+"  inline_data\n"						\
+"  verity\n"							\
 "  casefold\n"							\
 "  compression\n"						\
 "  nocompression\n"
 
 static void do_getflags(int argc, char **argv, const struct cmd_desc *cmd)
 {
-	long flag;
+	long flag = 0;
 	int ret, fd;
 	int exist = 0;
 
@@ -198,6 +226,30 @@ static void do_getflags(int argc, char **argv, const struct cmd_desc *cmd)
 		printf("nocompression");
 		exist = 1;
 	}
+	if (flag & FS_ENCRYPT_FL) {
+		if (exist)
+			printf(",");
+		printf("encrypt");
+		exist = 1;
+	}
+	if (flag & FS_VERITY_FL) {
+		if (exist)
+			printf(",");
+		printf("verity");
+		exist = 1;
+	}
+	if (flag & FS_INLINE_DATA_FL) {
+		if (exist)
+			printf(",");
+		printf("inline_data");
+		exist = 1;
+	}
+	if (flag & FS_NOCOW_FL) {
+		if (exist)
+			printf(",");
+		printf("nocow(pinned)");
+		exist = 1;
+	}
 	if (!exist)
 		printf("none");
 	printf("\n");
@@ -215,7 +267,7 @@ static void do_getflags(int argc, char **argv, const struct cmd_desc *cmd)
 
 static void do_setflags(int argc, char **argv, const struct cmd_desc *cmd)
 {
-	long flag;
+	long flag = 0;
 	int ret, fd;
 
 	if (argc != 3) {
@@ -496,6 +548,69 @@ static void do_read(int argc, char **argv, const struct cmd_desc *cmd)
 			printf(" ");
 	}
 	printf("\n");
+	exit(0);
+}
+
+#define randread_desc "random read data from file"
+#define randread_help					\
+"f2fs_io randread [chunk_size in 4kb] [count] [IO] [file_path]\n\n"	\
+"Do random read data in file_path\n"		\
+"IO can be\n"						\
+"  buffered : buffered IO\n"				\
+"  dio      : direct IO\n"				\
+
+static void do_randread(int argc, char **argv, const struct cmd_desc *cmd)
+{
+	u64 buf_size = 0, ret = 0, read_cnt = 0;
+	u64 idx, end_idx, aligned_size;
+	char *buf = NULL;
+	unsigned bs, count, i;
+	int flags = 0;
+	int fd;
+	time_t t;
+	struct stat stbuf;
+
+	if (argc != 5) {
+		fputs("Excess arguments\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	bs = atoi(argv[1]);
+	if (bs > 1024)
+		die("Too big chunk size - limit: 4MB");
+	buf_size = bs * 4096;
+
+	buf = aligned_xalloc(4096, buf_size);
+
+	count = atoi(argv[2]);
+	if (!strcmp(argv[3], "dio"))
+		flags |= O_DIRECT;
+	else if (strcmp(argv[3], "buffered"))
+		die("Wrong IO type");
+
+	fd = xopen(argv[4], O_RDONLY | flags, 0);
+
+	if (fstat(fd, &stbuf) != 0)
+		die_errno("fstat of source file failed");
+
+	aligned_size = (u64)stbuf.st_size & ~((u64)(4096 - 1));
+	if (aligned_size < buf_size)
+		die("File is too small to random read");
+	end_idx = (u64)(aligned_size - buf_size) / (u64)4096 + 1;
+
+	srand((unsigned) time(&t));
+
+	for (i = 0; i < count; i++) {
+		idx = rand() % end_idx;
+
+		ret = pread(fd, buf, buf_size, 4096 * idx);
+		if (ret != buf_size)
+			break;
+
+		read_cnt += ret;
+	}
+	printf("Read %"PRIu64" bytes\n", read_cnt);
 	exit(0);
 }
 
@@ -780,6 +895,7 @@ static void do_reserve_cblocks(int argc, char **argv, const struct cmd_desc *cmd
 static void do_help(int argc, char **argv, const struct cmd_desc *cmd);
 const struct cmd_desc cmd_list[] = {
 	_CMD(help),
+	CMD(fsync),
 	CMD(set_verity),
 	CMD(getflags),
 	CMD(setflags),
@@ -788,6 +904,7 @@ const struct cmd_desc cmd_list[] = {
 	CMD(fallocate),
 	CMD(write),
 	CMD(read),
+	CMD(randread),
 	CMD(fiemap),
 	CMD(gc_urgent),
 	CMD(defrag_file),
