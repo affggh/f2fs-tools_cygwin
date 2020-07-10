@@ -25,6 +25,7 @@ cc_defaults {
     ],
     include_dirs: [
         "external/e2fsprogs/lib/",
+        "external/e2fsprogs/lib/uuid",
         "system/core/libsparse/include",
     ],
     target: {

@@ -18,12 +18,12 @@
 #include <sys/mount.h>
 #endif
 #include <time.h>
-#include <uuid/uuid.h>
+#include <uuid.h>
 #include <errno.h>
 
 #include "config.h"
 #ifdef HAVE_LIBBLKID
-#  include <blkid/blkid.h>
+#  include <blkid.h>
 #endif
 
 #include "f2fs_fs.h"
