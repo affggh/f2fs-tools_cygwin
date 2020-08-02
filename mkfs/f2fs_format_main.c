@@ -52,6 +52,7 @@ static void mkfs_usage()
 	MSG(0, "  -g add default options\n");
 	MSG(0, "  -i extended node bitmap, node ratio is 20%% by default\n");
 	MSG(0, "  -l label\n");
+	MSG(0, "  -U uuid\n");
 	MSG(0, "  -m support zoned block device [default:0]\n");
 	MSG(0, "  -o overprovision percentage [default:auto]\n");
 	MSG(0, "  -O feature1[,feature2,...] e.g. \"encrypt\"\n");
@@ -88,6 +89,12 @@ static void f2fs_show_info()
 
 	if (c.defset == CONF_ANDROID)
 		MSG(0, "Info: Set conf for android\n");
+
+	if (c.feature & le32_to_cpu(F2FS_FEATURE_CASEFOLD))
+		MSG(0, "Info: Enable %s with casefolding\n",
+					f2fs_encoding2str(c.s_encoding));
+	if (c.feature & le32_to_cpu(F2FS_FEATURE_PRJQUOTA))
+		MSG(0, "Info: Enable Project quota\n");
 }
 
 static void add_default_options(void)
@@ -104,11 +111,19 @@ static void add_default_options(void)
 		c.root_uid = c.root_gid = 0;
 		break;
 	}
+#ifdef CONF_CASEFOLD
+	c.s_encoding = F2FS_ENC_UTF8_12_1;
+	c.feature |= cpu_to_le32(F2FS_FEATURE_CASEFOLD);
+#endif
+#ifdef CONF_PROJID
+	c.feature |= cpu_to_le32(F2FS_FEATURE_PRJQUOTA);
+	c.feature |= cpu_to_le32(F2FS_FEATURE_EXTRA_ATTR);
+#endif
 }
 
 static void f2fs_parse_options(int argc, char *argv[])
 {
-	static const char *option_string = "qa:c:C:d:e:E:g:il:mo:O:R:s:S:z:t:Vfw:";
+	static const char *option_string = "qa:c:C:d:e:E:g:il:mo:O:R:s:S:z:t:U:Vfw:";
 	int32_t option=0;
 	int val;
 	char *token;
@@ -185,6 +200,9 @@ static void f2fs_parse_options(int argc, char *argv[])
 			break;
 		case 't':
 			c.trim = atoi(optarg);
+			break;
+		case 'U':
+			c.vol_uuid = strdup(optarg);
 			break;
 		case 'f':
 			force_overwrite = 1;
