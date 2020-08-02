@@ -1158,6 +1158,8 @@ int get_device_info(int i)
 	c.sectors_per_blk = F2FS_BLKSIZE / c.sector_size;
 	c.total_sectors += dev->total_sectors;
 
+	if (c.sparse_mode && f2fs_init_sparse_file())
+		return -1;
 	return 0;
 }
 #endif
@@ -1302,6 +1304,17 @@ int f2fs_str2encoding(const char *string)
 			return f2fs_encoding_map[i].encoding_magic;
 
 	return -EINVAL;
+}
+
+char *f2fs_encoding2str(const int encoding)
+{
+	int i;
+
+	for (i = 0 ; i < ARRAY_SIZE(f2fs_encoding_map); i++)
+		if (f2fs_encoding_map[i].encoding_magic == encoding)
+			return f2fs_encoding_map[i].name;
+
+	return NULL;
 }
 
 int f2fs_get_encoding_flags(int encoding)
