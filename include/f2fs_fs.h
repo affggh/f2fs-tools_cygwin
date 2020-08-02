@@ -371,6 +371,7 @@ struct f2fs_configuration {
 	__u8 sb_version[VERSION_LEN + 1];
 	__u8 version[VERSION_LEN + 1];
 	char *vol_label;
+	char *vol_uuid;
 	u_int16_t s_encoding;
 	u_int16_t s_encoding_flags;
 	int heap;
@@ -1526,6 +1527,7 @@ extern const struct f2fs_nls_table *f2fs_load_nls_table(int encoding);
 #define F2FS_ENC_UTF8_12_0	1
 
 extern int f2fs_str2encoding(const char *string);
+extern char *f2fs_encoding2str(const int encoding);
 extern int f2fs_get_encoding_flags(int encoding);
 extern int f2fs_str2encoding_flags(char **param, __u16 *flags);
 
