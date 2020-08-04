@@ -104,8 +104,8 @@ cc_library_host_static {
     },
 }
 
-cc_binary {
-    name: "make_f2fs",
+cc_defaults {
+    name: "make_f2fs_defaults",
     defaults: [
         "f2fs-tools-defaults",
         "make_f2fs_src_files",
@@ -138,6 +138,28 @@ cc_binary {
             ldflags: ["-static"],
             host_ldlibs: ["-lws2_32"],
             enabled: true
+        },
+    },
+}
+
+cc_binary {
+    name: "make_f2fs",
+    defaults: [
+        "make_f2fs_defaults",
+    ],
+}
+
+cc_binary_host {
+    name: "make_f2fs_casefold",
+    defaults: [
+        "make_f2fs_defaults",
+    ],
+    target: {
+        host: {
+            cflags: ["-DCONF_CASEFOLD", "-DCONF_PROJID"],
+        },
+        windows: {
+            cflags: ["-DCONF_CASEFOLD", "-DCONF_PROJID"],
         },
     },
 }
