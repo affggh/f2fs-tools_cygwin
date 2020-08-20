@@ -71,6 +71,7 @@ cc_defaults {
         "fsck/mount.c",
         "lib/libf2fs.c",
         "lib/libf2fs_io.c",
+        "lib/libf2fs_zoned.c",
         "lib/nls_utf8.c",
         "fsck/dump.c",
     ],

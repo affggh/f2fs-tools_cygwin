@@ -58,10 +58,12 @@ static void mkfs_usage()
 	MSG(0, "  -O feature1[,feature2,...] e.g. \"encrypt\"\n");
 	MSG(0, "  -C [encoding[:flag1,...]] Support casefolding with optional flags\n");
 	MSG(0, "  -q quiet mode\n");
+	MSG(0, "  -r set checkpointing seed (srand()) to 0\n");
 	MSG(0, "  -R root_owner [default: 0:0]\n");
 	MSG(0, "  -s # of segments per section [default:1]\n");
 	MSG(0, "  -S sparse mode\n");
 	MSG(0, "  -t 0: nodiscard, 1: discard [default:1]\n");
+	MSG(0, "  -T timestamps\n");
 	MSG(0, "  -w wanted sector size\n");
 	MSG(0, "  -z # of sections per zone [default:1]\n");
 	MSG(0, "  -V print the version number and exit\n");
@@ -123,7 +125,7 @@ static void add_default_options(void)
 
 static void f2fs_parse_options(int argc, char *argv[])
 {
-	static const char *option_string = "qa:c:C:d:e:E:g:il:mo:O:R:s:S:z:t:U:Vfw:";
+	static const char *option_string = "qa:c:C:d:e:E:g:il:mo:O:rR:s:S:z:t:T:U:Vfw:";
 	int32_t option=0;
 	int val;
 	char *token;
@@ -183,6 +185,9 @@ static void f2fs_parse_options(int argc, char *argv[])
 			if (parse_feature(feature_table, optarg))
 				mkfs_usage();
 			break;
+		case 'r':
+			c.fake_seed = 1;
+			break;
 		case 'R':
 			if (parse_root_owner(optarg, &c.root_uid, &c.root_gid))
 				mkfs_usage();
@@ -200,6 +205,9 @@ static void f2fs_parse_options(int argc, char *argv[])
 			break;
 		case 't':
 			c.trim = atoi(optarg);
+			break;
+		case 'T':
+			c.fixed_time = strtoul(optarg, NULL, 0);
 			break;
 		case 'U':
 			c.vol_uuid = strdup(optarg);
