@@ -13,6 +13,17 @@
 
 #include "f2fs.h"
 
+enum {
+	FSCK_SUCCESS                 = 0,
+	FSCK_ERROR_CORRECTED         = 1 << 0,
+	FSCK_SYSTEM_SHOULD_REBOOT    = 1 << 1,
+	FSCK_ERRORS_LEFT_UNCORRECTED = 1 << 2,
+	FSCK_OPERATIONAL_ERROR       = 1 << 3,
+	FSCK_USAGE_OR_SYNTAX_ERROR   = 1 << 4,
+	FSCK_USER_CANCELLED          = 1 << 5,
+	FSCK_SHARED_LIB_ERROR        = 1 << 7,
+};
+
 struct quota_ctx;
 
 #define FSCK_UNMATCHED_EXTENT		0x00000001
@@ -224,6 +235,8 @@ extern u32 update_nat_bits_flags(struct f2fs_super_block *,
 				struct f2fs_checkpoint *, u32);
 extern void write_nat_bits(struct f2fs_sb_info *, struct f2fs_super_block *,
 			struct f2fs_checkpoint *, int);
+extern unsigned int get_usable_seg_count(struct f2fs_sb_info *);
+extern bool is_usable_seg(struct f2fs_sb_info *, unsigned int);
 
 /* dump.c */
 struct dump_option {
