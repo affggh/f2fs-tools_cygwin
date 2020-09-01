@@ -4,9 +4,9 @@ cc_defaults {
     name: "f2fs-tools-defaults",
     cflags: [
         "-DF2FS_MAJOR_VERSION=1",
-        "-DF2FS_MINOR_VERSION=13",
-        "-DF2FS_TOOLS_VERSION=\"1.13.0\"",
-        "-DF2FS_TOOLS_DATE=\"2019-09-24\"",
+        "-DF2FS_MINOR_VERSION=14",
+        "-DF2FS_TOOLS_VERSION=\"1.14.0\"",
+        "-DF2FS_TOOLS_DATE=\"2020-08-24\"",
         "-DWITH_ANDROID",
         "-Wall",
         "-Werror",
