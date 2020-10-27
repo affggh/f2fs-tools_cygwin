@@ -191,7 +191,11 @@ cc_binary {
     host_supported: true,
     recovery_available: true,
     cflags: ["-DWITH_SLOAD"],
-    srcs: ["fsck/fsck.c", "fsck/sload.c"],
+    srcs: [
+        "fsck/fsck.c",
+        "fsck/sload.c",
+        "fsck/compress.c",
+        ],
     target: {
         android: {
             shared_libs: [
@@ -202,6 +206,7 @@ cc_binary {
                 "libselinux",
                 "libcutils",
                 "liblog",
+                "liblz4",
             ],
         },
         host: {
@@ -214,6 +219,7 @@ cc_binary {
                 "libcutils",
                 "liblog",
                 "libz",
+                "liblz4",
             ],
         },
     },
