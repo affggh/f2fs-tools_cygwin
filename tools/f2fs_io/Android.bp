@@ -3,6 +3,9 @@ cc_defaults {
     cflags: [
         "-Wno-unused-function"
     ],
+    include_dirs: [
+       "external/f2fs-tools/include/",
+    ],
 }
 
 cc_binary {
