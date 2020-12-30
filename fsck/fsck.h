@@ -282,7 +282,16 @@ block_t new_node_block(struct f2fs_sb_info *,
 struct quota_file;
 u64 f2fs_quota_size(struct quota_file *);
 u64 f2fs_read(struct f2fs_sb_info *, nid_t, u8 *, u64, pgoff_t);
+enum wr_addr_type {
+	WR_NORMAL = 1,
+	WR_COMPRESS_DATA = 2,
+	WR_NULL_ADDR = NULL_ADDR,		/* 0 */
+	WR_NEW_ADDR = NEW_ADDR,			/* -1U */
+	WR_COMPRESS_ADDR = COMPRESS_ADDR,	/* -2U */
+};
 u64 f2fs_write(struct f2fs_sb_info *, nid_t, u8 *, u64, pgoff_t);
+u64 f2fs_write_compress_data(struct f2fs_sb_info *, nid_t, u8 *, u64, pgoff_t);
+u64 f2fs_write_addrtag(struct f2fs_sb_info *, nid_t, pgoff_t, unsigned int);
 void f2fs_filesize_update(struct f2fs_sb_info *, nid_t, u64);
 
 int get_dnode_of_data(struct f2fs_sb_info *, struct dnode_of_data *,
@@ -296,6 +305,8 @@ int f2fs_find_path(struct f2fs_sb_info *, char *, nid_t *);
 nid_t f2fs_lookup(struct f2fs_sb_info *, struct f2fs_node *, u8 *, int);
 int f2fs_add_link(struct f2fs_sb_info *, struct f2fs_node *,
 		const unsigned char *, int, nid_t, int, block_t, int);
+struct hardlink_cache_entry *f2fs_search_hardlink(struct f2fs_sb_info *sbi,
+						struct dentry *de);
 
 /* xattr.c */
 void *read_all_xattrs(struct f2fs_sb_info *, struct f2fs_node *);

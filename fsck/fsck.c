@@ -790,6 +790,17 @@ void fsck_chk_inode_blk(struct f2fs_sb_info *sbi, u32 nid,
 	}
 	ofs = get_extra_isize(node_blk);
 
+	if ((node_blk->i.i_flags & cpu_to_le32(F2FS_CASEFOLD_FL)) &&
+	    (ftype != F2FS_FT_DIR ||
+	     !(c.feature & cpu_to_le32(F2FS_FEATURE_CASEFOLD)))) {
+		ASSERT_MSG("[0x%x] unexpected casefold flag", nid);
+		if (c.fix_on) {
+			FIX_MSG("ino[0x%x] clear casefold flag", nid);
+			node_blk->i.i_flags &= ~cpu_to_le32(F2FS_CASEFOLD_FL);
+			need_fix = 1;
+		}
+	}
+
 	if ((node_blk->i.i_inline & F2FS_INLINE_DATA)) {
 		unsigned int inline_size = MAX_INLINE_DATA(node_blk);
 		if (cur_qtype != -1)
@@ -3135,10 +3146,11 @@ int fsck_verify(struct f2fs_sb_info *sbi)
 #ifndef WITH_ANDROID
 	if (nr_unref_nid && !c.ro) {
 		char ans[255] = {0};
+		int res;
 
 		printf("\nDo you want to restore lost files into ./lost_found/? [Y/N] ");
-		ret = scanf("%s", ans);
-		ASSERT(ret >= 0);
+		res = scanf("%s", ans);
+		ASSERT(res >= 0);
 		if (!strcasecmp(ans, "y")) {
 			for (i = 0; i < fsck->nr_nat_entries; i++) {
 				if (f2fs_test_bit(i, fsck->nat_area_bitmap))

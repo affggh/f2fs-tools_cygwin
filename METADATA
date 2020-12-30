@@ -12,7 +12,7 @@ third_party {
   license_type: RESTRICTED
   last_upgrade_date {
     year: 2020
-    month: 08
-    day: 24
+    month: 12
+    day: 28
   }
 }
