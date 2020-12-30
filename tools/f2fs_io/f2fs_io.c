@@ -24,12 +24,12 @@
 #include <getopt.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <linux/fs.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/sendfile.h>
@@ -42,6 +42,8 @@
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
+#include <android_config.h>
+
 #include "f2fs_io.h"
 
 struct cmd_desc {
@@ -432,6 +434,56 @@ static void do_fallocate(int argc, char **argv, const struct cmd_desc *cmd)
 	exit(0);
 }
 
+#define erase_desc "erase a block device"
+#define erase_help				\
+"f2fs_io erase [block_device_path]\n\n"		\
+"Send DISCARD | BLKSECDISCARD comamnd to"	\
+"block device in block_device_path\n"		\
+
+static void do_erase(int argc, char **argv, const struct cmd_desc *cmd)
+{
+	int fd, ret;
+	struct stat st;
+	u64 range[2];
+
+	if (argc != 2) {
+		fputs("Excess arguments\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	if (stat(argv[1], &st) != 0) {
+		fputs("stat error\n", stderr);
+		exit(1);
+	}
+
+	if (!S_ISBLK(st.st_mode)) {
+		fputs(argv[1], stderr);
+		fputs(" is not a block device\n", stderr);
+		exit(1);
+	}
+
+	fd = xopen(argv[1], O_WRONLY, 0);
+
+	range[0] = 0;
+	ret = ioctl(fd, BLKGETSIZE64, &range[1]);
+	if (ret < 0) {
+		fputs("get size failed\n", stderr);
+		exit(1);
+	}
+
+	ret = ioctl(fd, BLKSECDISCARD, &range);
+	if (ret < 0) {
+		ret = ioctl(fd, BLKDISCARD, &range);
+		if (ret < 0) {
+			fputs("Discard failed\n", stderr);
+			exit(1);
+		}
+	}
+
+	exit(0);
+}
+
 #define write_desc "write data into file"
 #define write_help					\
 "f2fs_io write [chunk_size in 4kb] [offset in chunk_size] [count] [pattern] [IO] [file_path]\n\n"	\
@@ -662,27 +714,18 @@ static void do_randread(int argc, char **argv, const struct cmd_desc *cmd)
 	exit(0);
 }
 
-struct file_ext {
-	__u32 f_pos;
-	__u32 start_blk;
-	__u32 end_blk;
-	__u32 blk_count;
-};
-
-#ifndef FIBMAP
-#define FIBMAP          _IO(0x00, 1)    /* bmap access */
-#endif
-
 #define fiemap_desc "get block address in file"
 #define fiemap_help					\
 "f2fs_io fiemap [offset in 4kb] [count] [file_path]\n\n"\
 
+#if defined(HAVE_LINUX_FIEMAP_H) && defined(HAVE_LINUX_FS_H)
 static void do_fiemap(int argc, char **argv, const struct cmd_desc *cmd)
 {
-	u64 offset;
-	u32 blknum;
 	unsigned count, i;
 	int fd;
+	__u64 phy_addr;
+	struct fiemap *fm = xmalloc(sizeof(struct fiemap) +
+			sizeof(struct fiemap_extent));
 
 	if (argc != 4) {
 		fputs("Excess arguments\n\n", stderr);
@@ -690,23 +733,37 @@ static void do_fiemap(int argc, char **argv, const struct cmd_desc *cmd)
 		exit(1);
 	}
 
-	offset = atoi(argv[1]);
+	fm->fm_start = atoi(argv[1]) * F2FS_BLKSIZE;
+	fm->fm_length = F2FS_BLKSIZE;
+	fm->fm_extent_count = 1;
 	count = atoi(argv[2]);
 
 	fd = xopen(argv[3], O_RDONLY | O_LARGEFILE, 0);
 
-	printf("Fiemap: offset = %08"PRIx64" len = %d\n", offset, count);
+	printf("Fiemap: offset = %08"PRIx64" len = %d\n",
+				(u64)fm->fm_start / F2FS_BLKSIZE, count);
 	for (i = 0; i < count; i++) {
-		blknum = offset + i;
+		if (ioctl(fd, FS_IOC_FIEMAP, fm) < 0)
+			die_errno("FIEMAP failed");
 
-		if (ioctl(fd, FIBMAP, &blknum) < 0)
-			die_errno("FIBMAP failed");
-
-		printf("%u ", blknum);
+		phy_addr = fm->fm_extents[0].fe_physical / F2FS_BLKSIZE;
+		if (phy_addr == NEW_ADDR)
+			printf("NEW_ADDR ");
+		else
+			printf("%llu ", phy_addr);
+		fm->fm_start += F2FS_BLKSIZE;
 	}
 	printf("\n");
+	free(fm);
 	exit(0);
 }
+#else
+static void do_fiemap(int UNUSED(argc), char **UNUSED(argv),
+			const struct cmd_desc *UNUSED(cmd))
+{
+	die("Not support for this platform");
+}
+#endif
 
 #define gc_urgent_desc "start/end/run gc_urgent for given time period"
 #define gc_urgent_help					\
@@ -935,6 +992,109 @@ static void do_reserve_cblocks(int argc, char **argv, const struct cmd_desc *cmd
 	exit(0);
 }
 
+#define get_coption_desc "get compression option of a compressed file"
+#define get_coption_help						\
+"f2fs_io get_coption [file]\n\n"	\
+"  algorithm        : compression algorithm (0:lzo, 1: lz4, 2:zstd, 3:lzorle)\n"	\
+"  log_cluster_size : compression cluster log size (2 <= log_size <= 8)\n"
+
+static void do_get_coption(int argc, char **argv, const struct cmd_desc *cmd)
+{
+	struct f2fs_comp_option option;
+	int ret, fd;
+
+	if (argc != 2) {
+		fputs("Excess arguments\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	fd = xopen(argv[1], O_RDONLY, 0);
+
+	ret = ioctl(fd, F2FS_IOC_GET_COMPRESS_OPTION, &option);
+	if (ret < 0)
+		die_errno("F2FS_IOC_GET_COMPRESS_OPTION failed");
+
+	printf("compression algorithm:%u\n", option.algorithm);
+	printf("compression cluster log size:%u\n", option.log_cluster_size);
+
+	exit(0);
+}
+
+#define set_coption_desc "set compression option of a compressed file"
+#define set_coption_help						\
+"f2fs_io set_coption [algorithm] [log_cluster_size] [file_path]\n\n"	\
+"  algorithm        : compression algorithm (0:lzo, 1: lz4, 2:zstd, 3:lzorle)\n"	\
+"  log_cluster_size : compression cluster log size (2 <= log_size <= 8)\n"
+
+static void do_set_coption(int argc, char **argv, const struct cmd_desc *cmd)
+{
+	struct f2fs_comp_option option;
+	int fd, ret;
+
+	if (argc != 4) {
+		fputs("Excess arguments\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	option.algorithm = atoi(argv[1]);
+	option.log_cluster_size = atoi(argv[2]);
+
+	fd = xopen(argv[3], O_WRONLY, 0);
+
+	ret = ioctl(fd, F2FS_IOC_SET_COMPRESS_OPTION, &option);
+	if (ret < 0)
+		die_errno("F2FS_IOC_SET_COMPRESS_OPTION failed");
+
+	printf("set compression option: algorithm=%u, log_cluster_size=%u\n",
+			option.algorithm, option.log_cluster_size);
+	exit(0);
+}
+
+#define decompress_desc "decompress an already compressed file"
+#define decompress_help "f2fs_io decompress [file_path]\n\n"
+
+static void do_decompress(int argc, char **argv, const struct cmd_desc *cmd)
+{
+	int fd, ret;
+
+	if (argc != 2) {
+		fputs("Excess arguments\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	fd = xopen(argv[1], O_WRONLY, 0);
+
+	ret = ioctl(fd, F2FS_IOC_DECOMPRESS_FILE);
+	if (ret < 0)
+		die_errno("F2FS_IOC_DECOMPRESS_FILE failed");
+
+	exit(0);
+}
+
+#define compress_desc "compress a compression enabled file"
+#define compress_help "f2fs_io compress [file_path]\n\n"
+
+static void do_compress(int argc, char **argv, const struct cmd_desc *cmd)
+{
+	int fd, ret;
+
+	if (argc != 2) {
+		fputs("Excess arguments\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	fd = xopen(argv[1], O_WRONLY, 0);
+
+	ret = ioctl(fd, F2FS_IOC_COMPRESS_FILE);
+	if (ret < 0)
+		die_errno("F2FS_IOC_COMPRESS_FILE failed");
+
+	exit(0);
+}
 
 #define CMD_HIDDEN 	0x0001
 #define CMD(name) { #name, do_##name, name##_desc, name##_help, 0 }
@@ -950,6 +1110,7 @@ const struct cmd_desc cmd_list[] = {
 	CMD(shutdown),
 	CMD(pinfile),
 	CMD(fallocate),
+	CMD(erase),
 	CMD(write),
 	CMD(read),
 	CMD(randread),
@@ -960,6 +1121,10 @@ const struct cmd_desc cmd_list[] = {
 	CMD(get_cblocks),
 	CMD(release_cblocks),
 	CMD(reserve_cblocks),
+	CMD(get_coption),
+	CMD(set_coption),
+	CMD(decompress),
+	CMD(compress),
 	{ NULL, NULL, NULL, NULL, 0 }
 };
 
