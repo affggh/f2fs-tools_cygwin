@@ -138,6 +138,7 @@ void sload_usage()
 	MSG(0, "  -S sparse_mode\n");
 	MSG(0, "  -t mount point [prefix of target fs path, default:/]\n");
 	MSG(0, "  -T timestamp\n");
+	MSG(0, "  -P preserve owner: user and group\n");
 	MSG(0, "  -c enable compression (default allow policy)\n");
 	MSG(0, "    ------------ Compression sub-options -----------------\n");
 	MSG(0, "    -L <log-of-blocks-per-cluster>, default 2\n");
@@ -505,7 +506,7 @@ void f2fs_parse_options(int argc, char *argv[])
 #endif
 	} else if (!strcmp("resize.f2fs", prog)) {
 #ifdef WITH_RESIZE
-		const char *option_string = "d:st:iV";
+		const char *option_string = "d:fst:iV";
 
 		c.func = RESIZE;
 		while ((option = getopt(argc, argv, option_string)) != EOF) {
@@ -520,6 +521,10 @@ void f2fs_parse_options(int argc, char *argv[])
 				c.dbg_lv = atoi(optarg);
 				MSG(0, "Info: Debug level = %d\n",
 							c.dbg_lv);
+				break;
+			case 'f':
+				c.force = 1;
+				MSG(0, "Info: Force to resize\n");
 				break;
 			case 's':
 				c.safe_resize = 1;
@@ -549,7 +554,7 @@ void f2fs_parse_options(int argc, char *argv[])
 #endif
 	} else if (!strcmp("sload.f2fs", prog)) {
 #ifdef WITH_SLOAD
-		const char *option_string = "cL:a:i:x:m:rC:d:f:p:s:St:T:V";
+		const char *option_string = "cL:a:i:x:m:rC:d:f:p:s:St:T:VP";
 #ifdef HAVE_LIBSELINUX
 		int max_nr_opt = (int)sizeof(c.seopt_file) /
 			sizeof(c.seopt_file[0]);
@@ -685,6 +690,9 @@ void f2fs_parse_options(int argc, char *argv[])
 			case 'V':
 				show_version(prog);
 				exit(0);
+			case 'P':
+				c.preserve_perms = 1;
+				break;
 			default:
 				err = EUNKNOWN_OPT;
 				break;
