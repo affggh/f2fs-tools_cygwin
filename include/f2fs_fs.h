@@ -35,6 +35,7 @@
 #define WITH_DEFRAG
 #define WITH_RESIZE
 #define WITH_SLOAD
+#define WITH_LABEL
 #endif
 
 #include <inttypes.h>
@@ -239,14 +240,14 @@ static inline uint64_t bswap_64(uint64_t val)
 
 #define MSG(n, fmt, ...)						\
 	do {								\
-		if (c.dbg_lv >= n) {					\
+		if (c.dbg_lv >= n && !c.layout) {			\
 			printf(fmt, ##__VA_ARGS__);			\
 		}							\
 	} while (0)
 
 #define DBG(n, fmt, ...)						\
 	do {								\
-		if (c.dbg_lv >= n) {					\
+		if (c.dbg_lv >= n && !c.layout) {			\
 			printf("[%s:%4d] " fmt,				\
 				__func__, __LINE__, ##__VA_ARGS__);	\
 		}							\
@@ -261,7 +262,11 @@ static inline uint64_t bswap_64(uint64_t val)
 #define DISP_u16(ptr, member)						\
 	do {								\
 		assert(sizeof((ptr)->member) == 2);			\
-		printf("%-30s" "\t\t[0x%8x : %u]\n",			\
+		if (c.layout)						\
+			printf("%-30s %u\n",				\
+			#member":", le16_to_cpu(((ptr)->member)));	\
+		else							\
+			printf("%-30s" "\t\t[0x%8x : %u]\n",		\
 			#member, le16_to_cpu(((ptr)->member)),		\
 			le16_to_cpu(((ptr)->member)));			\
 	} while (0)
@@ -269,7 +274,11 @@ static inline uint64_t bswap_64(uint64_t val)
 #define DISP_u32(ptr, member)						\
 	do {								\
 		assert(sizeof((ptr)->member) <= 4);			\
-		printf("%-30s" "\t\t[0x%8x : %u]\n",			\
+		if (c.layout)						\
+			printf("%-30s %u\n",				\
+			#member":", le32_to_cpu(((ptr)->member)));	\
+		else							\
+			printf("%-30s" "\t\t[0x%8x : %u]\n",		\
 			#member, le32_to_cpu(((ptr)->member)),		\
 			le32_to_cpu(((ptr)->member)));			\
 	} while (0)
@@ -277,14 +286,23 @@ static inline uint64_t bswap_64(uint64_t val)
 #define DISP_u64(ptr, member)						\
 	do {								\
 		assert(sizeof((ptr)->member) == 8);			\
-		printf("%-30s" "\t\t[0x%8llx : %llu]\n",		\
+		if (c.layout)						\
+			printf("%-30s %llu\n",				\
+			#member":", le64_to_cpu(((ptr)->member)));	\
+		else							\
+			printf("%-30s" "\t\t[0x%8llx : %llu]\n",	\
 			#member, le64_to_cpu(((ptr)->member)),		\
 			le64_to_cpu(((ptr)->member)));			\
 	} while (0)
 
 #define DISP_utf(ptr, member)						\
 	do {								\
-		printf("%-30s" "\t\t[%s]\n", #member, ((ptr)->member)); \
+		if (c.layout)						\
+			printf("%-30s %s\n", #member":",		\
+					((ptr)->member)); 		\
+		else							\
+			printf("%-30s" "\t\t[%s]\n", #member,		\
+					((ptr)->member));		\
 	} while (0)
 
 /* Display to buffer */
@@ -343,6 +361,7 @@ enum f2fs_config_func {
 	DEFRAG,
 	RESIZE,
 	SLOAD,
+	LABEL,
 };
 
 enum default_set {
@@ -439,6 +458,7 @@ struct f2fs_configuration {
 	u_int64_t wanted_total_sectors;
 	u_int64_t wanted_sector_size;
 	u_int64_t target_sectors;
+	u_int64_t max_size;
 	u_int32_t sectors_per_blk;
 	u_int32_t blks_per_seg;
 	__u8 init_version[VERSION_LEN + 1];
@@ -470,6 +490,7 @@ struct f2fs_configuration {
 	int bug_nat_bits;
 	int alloc_failed;
 	int auto_fix;
+	int layout;
 	int quota_fix;
 	int preen_mode;
 	int ro;
@@ -696,7 +717,8 @@ enum {
 #define F2FS_FEATURE_VERITY		0x0400	/* reserved */
 #define F2FS_FEATURE_SB_CHKSUM		0x0800
 #define F2FS_FEATURE_CASEFOLD		0x1000
- #define F2FS_FEATURE_COMPRESSION	0x2000
+#define F2FS_FEATURE_COMPRESSION	0x2000
+#define F2FS_FEATURE_RO			0x4000
 
 #define MAX_VOLUME_NAME		512
 
@@ -867,6 +889,8 @@ struct f2fs_extent {
 #define F2FS_DATA_EXIST		0x08	/* file inline data exist flag */
 #define F2FS_INLINE_DOTS	0x10	/* file having implicit dot dentries */
 #define F2FS_EXTRA_ATTR		0x20	/* file having extra attribute */
+#define F2FS_PIN_FILE		0x40	/* file should not be gced */
+#define F2FS_COMPRESS_RELEASED	0x80	/* file released compressed blocks */
 
 #if !defined(offsetof)
 #define offsetof(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
@@ -1546,6 +1570,7 @@ struct feature feature_table[] = {					\
 	{ "sb_checksum",		F2FS_FEATURE_SB_CHKSUM },	\
 	{ "casefold",			F2FS_FEATURE_CASEFOLD },	\
 	{ "compression",		F2FS_FEATURE_COMPRESSION },	\
+	{ "ro",				F2FS_FEATURE_RO},		\
 	{ NULL,				0x0},				\
 };
 
