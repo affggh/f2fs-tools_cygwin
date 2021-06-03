@@ -369,11 +369,16 @@ static void DISP_label(u_int16_t *name)
 	char buffer[MAX_VOLUME_NAME];
 
 	utf16_to_utf8(buffer, name, MAX_VOLUME_NAME, MAX_VOLUME_NAME);
-	printf("%-30s" "\t\t[%s]\n", "volum_name", buffer);
+	if (c.layout)
+		printf("%-30s %s\n", "Filesystem volume name:", buffer);
+	else
+		printf("%-30s" "\t\t[%s]\n", "volum_name", buffer);
 }
 
 void print_raw_sb_info(struct f2fs_super_block *sb)
 {
+	if (c.layout)
+		goto printout;
 	if (!c.dbg_lv)
 		return;
 
@@ -381,7 +386,7 @@ void print_raw_sb_info(struct f2fs_super_block *sb)
 	printf("+--------------------------------------------------------+\n");
 	printf("| Super block                                            |\n");
 	printf("+--------------------------------------------------------+\n");
-
+printout:
 	DISP_u32(sb, magic);
 	DISP_u32(sb, major_ver);
 
@@ -427,6 +432,8 @@ void print_ckpt_info(struct f2fs_sb_info *sbi)
 {
 	struct f2fs_checkpoint *cp = F2FS_CKPT(sbi);
 
+	if (c.layout)
+		goto printout;
 	if (!c.dbg_lv)
 		return;
 
@@ -434,7 +441,7 @@ void print_ckpt_info(struct f2fs_sb_info *sbi)
 	printf("+--------------------------------------------------------+\n");
 	printf("| Checkpoint                                             |\n");
 	printf("+--------------------------------------------------------+\n");
-
+printout:
 	DISP_u64(cp, checkpoint_ver);
 	DISP_u64(cp, user_block_count);
 	DISP_u64(cp, valid_block_count);
@@ -560,6 +567,9 @@ void print_sb_state(struct f2fs_super_block *sb)
 	}
 	if (f & cpu_to_le32(F2FS_FEATURE_COMPRESSION)) {
 		MSG(0, "%s", " compression");
+	}
+	if (f & cpu_to_le32(F2FS_FEATURE_RO)) {
+		MSG(0, "%s", " ro");
 	}
 	MSG(0, "\n");
 	MSG(0, "Info: superblock encrypt level = %d, salt = ",
@@ -856,9 +866,10 @@ int sanity_check_raw_super(struct f2fs_super_block *sb, enum SB_ADDR sb_addr)
 		return -1;
 	}
 
-	if (total_sections > segment_count ||
+	if (!(get_sb(feature) & cpu_to_le32(F2FS_FEATURE_RO)) &&
+			(total_sections > segment_count ||
 			total_sections < F2FS_MIN_SEGMENTS ||
-			segs_per_sec > segment_count || !segs_per_sec) {
+			segs_per_sec > segment_count || !segs_per_sec)) {
 		MSG(0, "\tInvalid segment/section count (%u, %u x %u)\n",
 			segment_count, total_sections, segs_per_sec);
 		return 1;
@@ -967,12 +978,13 @@ int validate_super_block(struct f2fs_sb_info *sbi, enum SB_ADDR sb_addr)
 					c.sb_version, c.version);
 		if (!c.no_kernel_check &&
 				memcmp(c.sb_version, c.version, VERSION_LEN)) {
+			c.auto_fix = 0;
+			c.fix_on = 1;
+		}
+		if (c.fix_on) {
 			memcpy(sbi->raw_super->version,
 						c.version, VERSION_LEN);
 			update_superblock(sbi->raw_super, SB_MASK(sb_addr));
-
-			c.auto_fix = 0;
-			c.fix_on = 1;
 		}
 		print_sb_state(sbi->raw_super);
 		return 0;
@@ -1254,14 +1266,16 @@ int sanity_check_ckpt(struct f2fs_sb_info *sbi)
 	ovp_segments = get_cp(overprov_segment_count);
 	reserved_segments = get_cp(rsvd_segment_count);
 
-	if (fsmeta < F2FS_MIN_SEGMENT || ovp_segments == 0 ||
-					reserved_segments == 0) {
+	if (!(get_sb(feature) & cpu_to_le32(F2FS_FEATURE_RO)) &&
+		(fsmeta < F2FS_MIN_SEGMENT || ovp_segments == 0 ||
+					reserved_segments == 0)) {
 		MSG(0, "\tWrong layout: check mkfs.f2fs version\n");
 		return 1;
 	}
 
 	user_block_count = get_cp(user_block_count);
-	segment_count_main = get_sb(segment_count_main);
+	segment_count_main = get_sb(segment_count_main) +
+				(cpu_to_le32(F2FS_FEATURE_RO) ? 1 : 0);
 	log_blocks_per_seg = get_sb(log_blocks_per_seg);
 	if (!user_block_count || user_block_count >=
 			segment_count_main << log_blocks_per_seg) {
@@ -1884,10 +1898,14 @@ static void read_normal_summaries(struct f2fs_sb_info *sbi, int type)
 void update_sum_entry(struct f2fs_sb_info *sbi, block_t blk_addr,
 					struct f2fs_summary *sum)
 {
+	struct f2fs_super_block *sb = F2FS_RAW_SUPER(sbi);
 	struct f2fs_summary_block *sum_blk;
 	u32 segno, offset;
 	int type, ret;
 	struct seg_entry *se;
+
+	if (get_sb(feature) & cpu_to_le32(F2FS_FEATURE_RO))
+		return;
 
 	segno = GET_SEGNO(sbi, blk_addr);
 	offset = OFFSET_IN_SEG(sbi, blk_addr);
@@ -2723,18 +2741,17 @@ int find_next_free_block(struct f2fs_sb_info *sbi, u64 *to, int left,
 		bitmap = get_seg_bitmap(sbi, se);
 		type = get_seg_type(sbi, se);
 
-		if (vblocks == sbi->blocks_per_seg ||
-				IS_CUR_SEGNO(sbi, segno)) {
+		if (vblocks == sbi->blocks_per_seg) {
+next_segment:
 			*to = left ? START_BLOCK(sbi, segno) - 1:
 						START_BLOCK(sbi, segno + 1);
 			continue;
 		}
-
-		if (vblocks == 0 && not_enough) {
-			*to = left ? START_BLOCK(sbi, segno) - 1:
-						START_BLOCK(sbi, segno + 1);
-			continue;
-		}
+		if (!(get_sb(feature) & cpu_to_le32(F2FS_FEATURE_RO)) &&
+						IS_CUR_SEGNO(sbi, segno))
+			goto next_segment;
+		if (vblocks == 0 && not_enough)
+			goto next_segment;
 
 		if (vblocks == 0 && !(segno % sbi->segs_per_sec)) {
 			struct seg_entry *se2;
@@ -2765,17 +2782,24 @@ int find_next_free_block(struct f2fs_sb_info *sbi, u64 *to, int left,
 static void move_one_curseg_info(struct f2fs_sb_info *sbi, u64 from, int left,
 				 int i)
 {
+	struct f2fs_super_block *sb = F2FS_RAW_SUPER(sbi);
 	struct curseg_info *curseg = CURSEG_I(sbi, i);
 	struct f2fs_summary_block buf;
 	u32 old_segno;
 	u64 ssa_blk, to;
 	int ret;
 
+	if ((get_sb(feature) & cpu_to_le32(F2FS_FEATURE_RO))) {
+		if (i != CURSEG_HOT_DATA && i != CURSEG_HOT_NODE)
+			return;
+		goto bypass_ssa;
+	}
+
 	/* update original SSA too */
 	ssa_blk = GET_SUM_BLKADDR(sbi, curseg->segno);
 	ret = dev_write_block(curseg->sum_blk, ssa_blk);
 	ASSERT(ret >= 0);
-
+bypass_ssa:
 	to = from;
 	ret = find_next_free_block(sbi, &to, left, i,
 				   c.zoned_model == F2FS_ZONED_HM);
@@ -3014,10 +3038,12 @@ void write_checkpoint(struct f2fs_sb_info *sbi)
 		ret = dev_write_block(curseg->sum_blk, cp_blk_no++);
 		ASSERT(ret >= 0);
 
-		/* update original SSA too */
-		ssa_blk = GET_SUM_BLKADDR(sbi, curseg->segno);
-		ret = dev_write_block(curseg->sum_blk, ssa_blk);
-		ASSERT(ret >= 0);
+		if (!(get_sb(feature) & cpu_to_le32(F2FS_FEATURE_RO))) {
+			/* update original SSA too */
+			ssa_blk = GET_SUM_BLKADDR(sbi, curseg->segno);
+			ret = dev_write_block(curseg->sum_blk, ssa_blk);
+			ASSERT(ret >= 0);
+		}
 	}
 
 	/* Write nat bits */
@@ -3534,6 +3560,8 @@ int f2fs_do_mount(struct f2fs_sb_info *sbi)
 		if (get_cp(ckpt_flags) & CP_QUOTA_NEED_FSCK_FLAG)
 			c.fix_on = 1;
 	}
+	if (c.layout)
+		return 1;
 
 	if (tune_sb_features(sbi))
 		return -1;
