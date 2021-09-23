@@ -74,7 +74,7 @@ void fsck_usage()
 	MSG(0, "  -l show superblock/checkpoint\n");
 	MSG(0, "  -M show a file map\n");
 	MSG(0, "  -O feature1[feature2,feature3,...] e.g. \"encrypt\"\n");
-	MSG(0, "  -p preen mode [default:0 the same as -a [0|1]]\n");
+	MSG(0, "  -p preen mode [default:0 the same as -a [0|1|2]]\n");
 	MSG(0, "  -S sparse_mode\n");
 	MSG(0, "  -t show directory tree\n");
 	MSG(0, "  -q preserve quota limits\n");
@@ -820,6 +820,7 @@ static int do_fsck(struct f2fs_sb_info *sbi)
 	struct f2fs_checkpoint *ckpt = F2FS_CKPT(sbi);
 	u32 flag = le32_to_cpu(ckpt->ckpt_flags);
 	u32 blk_cnt;
+	struct f2fs_compr_blk_cnt cbc;
 	errcode_t ret;
 
 	fsck_init(sbi);
@@ -867,6 +868,8 @@ static int do_fsck(struct f2fs_sb_info *sbi)
 
 	/* Traverse all block recursively from root inode */
 	blk_cnt = 1;
+	cbc.cnt = 0;
+	cbc.cheader_pgofs = CHEADER_PGOFS_NONE;
 
 	if (c.feature & cpu_to_le32(F2FS_FEATURE_QUOTA_INO)) {
 		ret = quota_init_context(sbi);
@@ -877,7 +880,7 @@ static int do_fsck(struct f2fs_sb_info *sbi)
 	}
 	fsck_chk_orphan_node(sbi);
 	fsck_chk_node_blk(sbi, NULL, sbi->root_ino_num,
-			F2FS_FT_DIR, TYPE_INODE, &blk_cnt, NULL);
+			F2FS_FT_DIR, TYPE_INODE, &blk_cnt, &cbc, NULL);
 	fsck_chk_quota_files(sbi);
 
 	ret = fsck_verify(sbi);
@@ -1117,7 +1120,7 @@ int main(int argc, char **argv)
 	}
 
 	/* Get device */
-	if (f2fs_get_device_info() < 0) {
+	if (f2fs_get_device_info() < 0 || f2fs_get_f2fs_info() < 0) {
 		ret = -1;
 		if (c.func == FSCK)
 			ret = FSCK_OPERATIONAL_ERROR;
