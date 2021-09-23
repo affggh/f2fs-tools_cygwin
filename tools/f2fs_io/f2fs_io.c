@@ -731,11 +731,11 @@ static void do_randread(int argc, char **argv, const struct cmd_desc *cmd)
 #if defined(HAVE_LINUX_FIEMAP_H) && defined(HAVE_LINUX_FS_H)
 static void do_fiemap(int argc, char **argv, const struct cmd_desc *cmd)
 {
-	unsigned count, i;
-	int fd;
-	__u64 phy_addr;
-	struct fiemap *fm = xmalloc(sizeof(struct fiemap) +
-			sizeof(struct fiemap_extent));
+	unsigned int i;
+	int fd, extents_mem_size;
+	u64 start, length;
+	u32 mapped_extents;
+	struct fiemap *fm = xmalloc(sizeof(struct fiemap));
 
 	if (argc != 4) {
 		fputs("Excess arguments\n\n", stderr);
@@ -743,25 +743,40 @@ static void do_fiemap(int argc, char **argv, const struct cmd_desc *cmd)
 		exit(1);
 	}
 
-	fm->fm_start = atoi(argv[1]) * F2FS_BLKSIZE;
-	fm->fm_length = F2FS_BLKSIZE;
-	fm->fm_extent_count = 1;
-	count = atoi(argv[2]);
+	memset(fm, 0, sizeof(struct fiemap));
+	start = atoi(argv[1]) * F2FS_BLKSIZE;
+	length = atoi(argv[2]) * F2FS_BLKSIZE;
+	fm->fm_start = start;
+	fm->fm_length = length;
 
 	fd = xopen(argv[3], O_RDONLY | O_LARGEFILE, 0);
 
-	printf("Fiemap: offset = %08"PRIx64" len = %d\n",
-				(u64)fm->fm_start / F2FS_BLKSIZE, count);
-	for (i = 0; i < count; i++) {
-		if (ioctl(fd, FS_IOC_FIEMAP, fm) < 0)
-			die_errno("FIEMAP failed");
+	printf("Fiemap: offset = %"PRIu64" len = %"PRIu64"\n",
+				start / F2FS_BLKSIZE, length / F2FS_BLKSIZE);
+	if (ioctl(fd, FS_IOC_FIEMAP, fm) < 0)
+		die_errno("FIEMAP failed");
 
-		phy_addr = fm->fm_extents[0].fe_physical / F2FS_BLKSIZE;
-		if (phy_addr == NEW_ADDR)
-			printf("NEW_ADDR ");
-		else
-			printf("%llu ", phy_addr);
-		fm->fm_start += F2FS_BLKSIZE;
+	mapped_extents = fm->fm_mapped_extents;
+	extents_mem_size = sizeof(struct fiemap_extent) * mapped_extents;
+	free(fm);
+	fm = xmalloc(sizeof(struct fiemap) + extents_mem_size);
+
+	memset(fm, 0, sizeof(struct fiemap) + extents_mem_size);
+	fm->fm_start = start;
+	fm->fm_length = length;
+	fm->fm_extent_count = mapped_extents;
+
+	if (ioctl(fd, FS_IOC_FIEMAP, fm) < 0)
+		die_errno("FIEMAP failed");
+
+	printf("\t%-17s%-17s%-17s%s\n", "logical addr.", "physical addr.", "length", "flags");
+	for (i = 0; i < fm->fm_mapped_extents; i++) {
+		printf("%d\t%.16llx %.16llx %.16llx %.8x\n", i,
+		    fm->fm_extents[i].fe_logical, fm->fm_extents[i].fe_physical,
+		    fm->fm_extents[i].fe_length, fm->fm_extents[i].fe_flags);
+
+		if (fm->fm_extents[i].fe_flags & FIEMAP_EXTENT_LAST)
+			break;
 	}
 	printf("\n");
 	free(fm);
@@ -1168,6 +1183,41 @@ static void do_get_filename_encrypt_mode (int argc, char **argv,
 	exit(0);
 }
 
+#define rename_desc "rename source to target file with fsync option"
+#define rename_help							\
+"f2fs_io rename [src_path] [target_path] [fsync_after_rename]\n\n"	\
+"e.g., f2fs_io rename source dest 1\n"					\
+"      1. open(source)\n"						\
+"      2. rename(source, dest)\n"					\
+"      3. fsync(source)\n"						\
+"      4. close(source)\n"
+
+static void do_rename(int argc, char **argv, const struct cmd_desc *cmd)
+{
+	int fd = -1;
+	int ret;
+
+	if (argc != 4) {
+		fputs("Excess arguments\n\n", stderr);
+		fputs(cmd->cmd_help, stderr);
+		exit(1);
+	}
+
+	if (atoi(argv[3]))
+		fd = xopen(argv[1], O_WRONLY, 0);
+
+	ret = rename(argv[1], argv[2]);
+	if (ret < 0)
+		die_errno("rename failed");
+
+	if (fd >= 0) {
+		if (fsync(fd) != 0)
+			die_errno("fsync failed: %s", argv[1]);
+		close(fd);
+	}
+	exit(0);
+}
+
 #define CMD_HIDDEN 	0x0001
 #define CMD(name) { #name, do_##name, name##_desc, name##_help, 0 }
 #define _CMD(name) { #name, do_##name, NULL, NULL, CMD_HIDDEN }
@@ -1198,6 +1248,7 @@ const struct cmd_desc cmd_list[] = {
 	CMD(decompress),
 	CMD(compress),
 	CMD(get_filename_encrypt_mode),
+	CMD(rename),
 	{ NULL, NULL, NULL, NULL, 0 }
 };
 

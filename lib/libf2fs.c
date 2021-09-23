@@ -499,8 +499,6 @@ opaque_seq:
 	return __f2fs_dentry_hash(name, len);
 }
 
-#define ALIGN_DOWN(addrs, size)	(((addrs) / (size)) * (size))
-#define ALIGN_UP(addrs, size)	ALIGN_DOWN(((addrs) + (size) - 1), (size))
 unsigned int addrs_per_inode(struct f2fs_inode *i)
 {
 	unsigned int addrs = CUR_ADDRS_PER_INODE(i) - get_inline_xattr_addrs(i);
@@ -828,7 +826,7 @@ int f2fs_devs_are_umounted(void)
 void get_kernel_version(__u8 *version)
 {
 	int i;
-	for (i = 0; i < VERSION_LEN; i++) {
+	for (i = 0; i < VERSION_NAME_LEN; i++) {
 		if (version[i] == '\n')
 			break;
 	}
@@ -846,10 +844,10 @@ void get_kernel_uname_version(__u8 *version)
 
 #if defined(WITH_KERNEL_VERSION)
 	snprintf((char *)version,
-		VERSION_LEN, "%s %s", buf.release, buf.version);
+		VERSION_NAME_LEN, "%s %s", buf.release, buf.version);
 #else
 	snprintf((char *)version,
-		VERSION_LEN, "%s", buf.release);
+		VERSION_NAME_LEN, "%s", buf.release);
 #endif
 #else
 	memset(version, 0, VERSION_LEN);
@@ -1185,6 +1183,12 @@ int f2fs_get_device_info(void)
 	for (i = 0; i < c.ndevs; i++)
 		if (get_device_info(i))
 			return -1;
+	return 0;
+}
+
+int f2fs_get_f2fs_info(void)
+{
+	int i;
 
 	if (c.wanted_total_sectors < c.total_sectors) {
 		MSG(0, "Info: total device sectors = %"PRIu64" (in %u bytes)\n",
