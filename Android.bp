@@ -219,6 +219,7 @@ cc_binary {
         "libbase",
     ],
     symlinks: ["resize.f2fs", "defrag.f2fs", "dump.f2fs"],
+    vendor_ramdisk_available: true,
 }
 
 cc_binary {
