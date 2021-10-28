@@ -204,6 +204,19 @@ cc_binary_host {
     },
 }
 
+cc_binary_host {
+    name: "make_f2fs.static",
+    defaults: [
+        "make_f2fs_defaults",
+    ],
+    target: {
+        host: {
+            ldflags: ["-static"],
+        },
+    },
+    stl: "libc++_static",
+}
+
 cc_binary {
     name: "fsck.f2fs",
     defaults: [
