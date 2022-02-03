@@ -209,11 +209,7 @@ cc_binary_host {
     defaults: [
         "make_f2fs_defaults",
     ],
-    target: {
-        host: {
-            ldflags: ["-static"],
-        },
-    },
+    static_executable: true,
     stl: "libc++_static",
 }
 
