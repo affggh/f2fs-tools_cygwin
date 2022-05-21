@@ -1,4 +1,6 @@
 name: "f2fs-tools"
+description: "F2FS filesystem tools"
+
 third_party {
   url {
     type: HOMEPAGE
