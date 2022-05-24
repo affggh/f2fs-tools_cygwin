@@ -43,9 +43,9 @@ cc_defaults {
     name: "f2fs-tools-defaults",
     cflags: [
         "-DF2FS_MAJOR_VERSION=1",
-        "-DF2FS_MINOR_VERSION=14",
-        "-DF2FS_TOOLS_VERSION=\"1.14.0\"",
-        "-DF2FS_TOOLS_DATE=\"2020-08-24\"",
+        "-DF2FS_MINOR_VERSION=15",
+        "-DF2FS_TOOLS_VERSION=\"1.15.0\"",
+        "-DF2FS_TOOLS_DATE=\"2022-05-20\"",
         "-DWITH_ANDROID",
         "-Wall",
         "-Werror",
@@ -66,6 +66,7 @@ cc_defaults {
         "external/e2fsprogs/lib/",
         "external/e2fsprogs/lib/uuid",
         "system/core/libsparse/include",
+        "bionic/libc",
     ],
     target: {
         windows: {
@@ -294,6 +295,9 @@ cc_defaults {
     ],
     local_include_dirs: [
         "include",
+    ],
+    include_dirs: [
+        "bionic/libc",
     ],
     target: {
         windows: {
