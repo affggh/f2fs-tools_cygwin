@@ -18,6 +18,9 @@
 #ifndef O_LARGEFILE
 #define O_LARGEFILE 0
 #endif
+#ifndef __SANE_USERSPACE_TYPES__
+#define __SANE_USERSPACE_TYPES__       /* For PPC64, to get LL64 types */
+#endif
 
 #include <errno.h>
 #include <fcntl.h>
@@ -132,22 +135,23 @@ static void full_write(int fd, const void *buf, size_t count)
 	}
 }
 
-#if defined(__APPLE__)
+#ifdef HAVE_MACH_TIME_H
 static u64 get_current_us()
 {
-#ifdef HAVE_MACH_TIME_H
 	return mach_absolute_time() / 1000;
-#else
-	return 0;
-#endif
 }
-#else
+#elif defined(HAVE_CLOCK_GETTIME) && defined(HAVE_CLOCK_BOOTTIME)
 static u64 get_current_us()
 {
 	struct timespec t;
 	t.tv_sec = t.tv_nsec = 0;
 	clock_gettime(CLOCK_BOOTTIME, &t);
 	return (u64)t.tv_sec * 1000000LL + t.tv_nsec / 1000;
+}
+#else
+static u64 get_current_us()
+{
+	return 0;
 }
 #endif
 
@@ -512,7 +516,7 @@ static void do_erase(int argc, char **argv, const struct cmd_desc *cmd)
 
 static void do_write(int argc, char **argv, const struct cmd_desc *cmd)
 {
-	u64 buf_size = 0, inc_num = 0, ret = 0, written = 0;
+	u64 buf_size = 0, inc_num = 0, written = 0;
 	u64 offset;
 	char *buf = NULL;
 	unsigned bs, count, i;
@@ -560,6 +564,8 @@ static void do_write(int argc, char **argv, const struct cmd_desc *cmd)
 	fd = xopen(argv[6], O_CREAT | O_WRONLY | flags, 0755);
 
 	if (atomic_commit || atomic_abort) {
+		int ret;
+
 		if (argc == 8)
 			useconds = atoi(argv[7]) * 1000;
 
@@ -572,6 +578,8 @@ static void do_write(int argc, char **argv, const struct cmd_desc *cmd)
 
 	total_time = get_current_us();
 	for (i = 0; i < count; i++) {
+		uint64_t ret;
+
 		if (!strcmp(argv[4], "inc_num"))
 			*(int *)buf = inc_num++;
 		else if (!strcmp(argv[4], "rand"))
@@ -592,12 +600,16 @@ static void do_write(int argc, char **argv, const struct cmd_desc *cmd)
 		usleep(useconds);
 
 	if (atomic_commit) {
+		int ret;
+
 		ret = ioctl(fd, F2FS_IOC_COMMIT_ATOMIC_WRITE);
 		if (ret < 0) {
 			fputs("committing atomic write failed\n", stderr);
 			exit(1);
 		}
 	} else if (atomic_abort) {
+		int ret;
+
 		ret = ioctl(fd, F2FS_IOC_ABORT_VOLATILE_WRITE);
 		if (ret < 0) {
 			fputs("aborting atomic write failed\n", stderr);

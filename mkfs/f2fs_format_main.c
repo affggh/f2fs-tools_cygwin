@@ -15,17 +15,19 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#ifndef ANDROID_WINDOWS_HOST
+#ifdef HAVE_SYS_MOUNT_H
 #include <sys/mount.h>
 #endif
 #include <time.h>
-#include <uuid.h>
 #include <errno.h>
 #include <getopt.h>
 
 #include "config.h"
 #ifdef HAVE_LIBBLKID
-#include <blkid.h>
+#include <blkid/blkid.h>
+#endif
+#ifdef HAVE_UUID_UUID_H
+#include <uuid/uuid.h>
 #endif
 
 #include "f2fs_fs.h"
@@ -35,7 +37,7 @@
 #ifdef HAVE_SYS_UTSNAME_H
 #include <sys/utsname.h>
 #endif
-#ifdef WITH_ANDROID
+#ifdef HAVE_SPARSE_SPARSE_H
 #include <sparse/sparse.h>
 extern struct sparse_file *f2fs_sparse_file;
 #endif
@@ -253,7 +255,7 @@ static void f2fs_parse_options(int argc, char *argv[])
 			break;
 		case 'S':
 			c.device_size = atoll(optarg);
-			c.device_size &= (~((u_int64_t)(F2FS_BLKSIZE - 1)));
+			c.device_size &= (~((uint64_t)(F2FS_BLKSIZE - 1)));
 			c.sparse_mode = 1;
 			break;
 		case 'z':

@@ -498,7 +498,7 @@ static int sanity_check_nid(struct f2fs_sb_info *sbi, u32 nid,
 		fsck->chk.valid_node_cnt++;
 
 		/* Progress report */
-		if (sbi->total_valid_node_count > 1000) {
+		if (!c.show_file_map && sbi->total_valid_node_count > 1000) {
 			unsigned int p10 = sbi->total_valid_node_count / 10;
 
 			if (sbi->fsck->chk.checked_node_cnt++ % p10)
@@ -1669,6 +1669,7 @@ static int __chk_dentries(struct f2fs_sb_info *sbi, int casefolded,
 				switch (ret) {
 				case 1:
 					fixed = 1;
+					fallthrough;
 				case 0:
 					child->dots++;
 					break;
@@ -2312,7 +2313,7 @@ static void fix_checkpoint(struct f2fs_sb_info *sbi)
 	block_t cp_blocks;
 	u32 i;
 	int ret;
-	u_int32_t crc = 0;
+	uint32_t crc = 0;
 
 	/* should call from fsck */
 	ASSERT(c.func == FSCK);
@@ -2438,7 +2439,7 @@ static int check_curseg_write_pointer(struct f2fs_sb_info *sbi, int type)
 	struct f2fs_fsck *fsck = F2FS_FSCK(sbi);
 	struct blk_zone blkz;
 	block_t cs_block, wp_block, zone_last_vblock;
-	u_int64_t cs_sector, wp_sector;
+	uint64_t cs_sector, wp_sector;
 	int i, ret;
 	unsigned int zone_segno;
 	int log_sectors_per_block = sbi->log_blocksize - SECTOR_SHIFT;
@@ -2993,7 +2994,7 @@ struct write_pointer_check_data {
 	int dev_index;
 };
 
-static int chk_and_fix_wp_with_sit(int i, void *blkzone, void *opaque)
+static int chk_and_fix_wp_with_sit(int UNUSED(i), void *blkzone, void *opaque)
 {
 	struct blk_zone *blkz = (struct blk_zone *)blkzone;
 	struct write_pointer_check_data *wpd = opaque;
