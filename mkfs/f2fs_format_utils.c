@@ -48,10 +48,10 @@
 #endif
 #endif
 
-static int trim_device(int i)
-{
 #if defined(FALLOC_FL_PUNCH_HOLE) || defined(BLKDISCARD) || \
 	defined(BLKSECDISCARD)
+static int trim_device(int i)
+{
 	unsigned long long range[2];
 	struct stat *stat_buf;
 	struct device_info *dev = c.devices + i;
@@ -110,13 +110,18 @@ static int trim_device(int i)
 	}
 #endif
 	free(stat_buf);
-#endif
 	return 0;
 }
+#else
+static int trim_device(int UNUSED(i))
+{
+	return 0;
+}
+#endif
 
+#ifdef WITH_ANDROID
 static bool is_wiped_device(int i)
 {
-#ifdef WITH_ANDROID
 	struct device_info *dev = c.devices + i;
 	int fd = dev->fd;
 	char *buf, *zero_buf;
@@ -156,10 +161,13 @@ static bool is_wiped_device(int i)
 	if (wiped)
 		MSG(0, "Info: Found all zeros in first %d blocks\n", nblocks);
 	return wiped;
-#else
-	return false;
-#endif
 }
+#else
+static bool is_wiped_device(int UNUSED(i))
+{
+	return false;
+}
+#endif
 
 int f2fs_trim_devices(void)
 {
