@@ -22,9 +22,6 @@
 #endif
 #include <time.h>
 #include <sys/stat.h>
-#ifdef HAVE_SYS_MOUNT_H
-#include <sys/mount.h>
-#endif
 #ifdef HAVE_SYS_IOCTL_H
 #include <sys/ioctl.h>
 #endif
@@ -880,10 +877,12 @@ static int open_check_fs(char *path, int flag)
 	return open(path, O_RDONLY | flag);
 }
 
+#ifdef __linux__
 static int is_power_of_2(unsigned long n)
 {
 	return (n != 0 && ((n & (n - 1)) == 0));
 }
+#endif
 
 int get_device_info(int i)
 {
