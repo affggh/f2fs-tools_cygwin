@@ -62,11 +62,6 @@ cc_defaults {
         "mkfs",
         "fsck",
     ],
-    include_dirs: [
-        "external/e2fsprogs/lib/",
-        "external/e2fsprogs/lib/uuid",
-        "system/core/libsparse/include",
-    ],
     target: {
         windows: {
             enabled: false,
@@ -83,6 +78,9 @@ cc_defaults {
         "mkfs/f2fs_format_utils.c",
         "lib/libf2fs_zoned.c",
         "lib/nls_utf8.c",
+    ],
+    static_libs: [
+        "libext2_uuid",
     ],
 }
 
