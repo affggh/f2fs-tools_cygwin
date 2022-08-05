@@ -49,13 +49,10 @@ cc_defaults {
         "-DWITH_ANDROID",
         "-Wall",
         "-Werror",
-        "-Wno-format",
         "-Wno-macro-redefined",
         "-Wno-missing-field-initializers",
         "-Wno-pointer-arith",
         "-Wno-sign-compare",
-        "-Wno-unused-function",
-        "-Wno-string-plus-int",
     ],
     local_include_dirs: [
         "include",
@@ -280,6 +277,8 @@ cc_binary {
     cflags: [
         "--static",
         "-U_FORTIFY_SOURCE",
+	"-Wall",
+	"-Werror",
     ],
     srcs: ["tools/check_f2fs.c"],
     product_specific: true,
@@ -288,7 +287,8 @@ cc_binary {
 cc_defaults {
     name: "tools-defaults",
     cflags: [
-        "-Wno-unused-function",
+	"-Wall",
+	"-Werror",
     ],
     local_include_dirs: [
         "include",
