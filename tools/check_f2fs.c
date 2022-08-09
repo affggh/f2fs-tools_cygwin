@@ -32,7 +32,7 @@
 int buf[BLOCKS];
 char cmd[BLOCK];
 
-static int run(char *cmd)
+static int run(const char *cmd)
 {
 	int status;
 
@@ -42,7 +42,10 @@ static int run(char *cmd)
 	case 0:
 		/* redirect stderr to stdout */
 		dup2(1, 2);
-		execl("/system/bin/sh", "sh", "-c", cmd, (char *) 0);
+		execl("/system/bin/sh", "sh", "-c", cmd, (char *) NULL);
+	case -1:
+		printf("fork failed in run() errno:%d\n", errno);
+		return -1;
 	default:
 		wait(&status);
 	}
