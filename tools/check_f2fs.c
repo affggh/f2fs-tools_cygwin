@@ -72,7 +72,13 @@ static int test_atomic_write(char *path)
 		return -1;
 	}
 	printf("\tCheck : Atomic in-memory count: 2\n");
-	run("cat /sys/kernel/debug/f2fs/status | grep \"atomic IO\"");
+	if (access("/dev/sys/fs/by-name/userdata/current_atomic_write", F_OK)
+			== 0) {
+		printf("- inmem: ");
+		run("cat /dev/sys/fs/by-name/userdata/current_atomic_write");
+	} else {
+		run("grep \"atomic IO\" /sys/kernel/debug/f2fs/status");
+	}
 
 	printf("\tCommit  ... \n");
 	ret = ioctl(db, F2FS_IOC_COMMIT_ATOMIC_WRITE);
