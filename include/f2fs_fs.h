@@ -349,10 +349,6 @@ static inline uint64_t bswap_64(uint64_t val)
 		snprintf(buf, len, #member)
 
 /* these are defined in kernel */
-#ifndef PAGE_SIZE
-#define PAGE_SIZE		4096
-#endif
-#define PAGE_CACHE_SIZE		4096
 #define BITS_PER_BYTE		8
 #ifndef SECTOR_SHIFT
 #define SECTOR_SHIFT		9
@@ -949,9 +945,10 @@ static_assert(sizeof(struct f2fs_extent) == 12, "");
 				DEFAULT_INLINE_XATTR_ADDRS -		\
 				F2FS_TOTAL_EXTRA_ATTR_SIZE -		\
 				DEF_INLINE_RESERVED_SIZE))
-#define INLINE_DATA_OFFSET	(PAGE_CACHE_SIZE - sizeof(struct node_footer) \
-				- sizeof(__le32)*(DEF_ADDRS_PER_INODE + 5 - \
-				DEF_INLINE_RESERVED_SIZE))
+#define INLINE_DATA_OFFSET	(F2FS_BLKSIZE -				\
+				sizeof(struct node_footer) -		\
+				sizeof(__le32) * (DEF_ADDRS_PER_INODE +	\
+				5 - DEF_INLINE_RESERVED_SIZE))
 
 #define DEF_DIR_LEVEL		0
 
@@ -1093,7 +1090,7 @@ static_assert(sizeof(struct f2fs_node) == 4096, "");
 /*
  * For NAT entries
  */
-#define NAT_ENTRY_PER_BLOCK (PAGE_CACHE_SIZE / sizeof(struct f2fs_nat_entry))
+#define NAT_ENTRY_PER_BLOCK (F2FS_BLKSIZE / sizeof(struct f2fs_nat_entry))
 #define NAT_BLOCK_OFFSET(start_nid) (start_nid / NAT_ENTRY_PER_BLOCK)
 
 #define DEFAULT_NAT_ENTRY_RATIO		20
@@ -1120,7 +1117,7 @@ static_assert(sizeof(struct f2fs_nat_block) == 4095, "");
  * Not allow to change this.
  */
 #define SIT_VBLOCK_MAP_SIZE 64
-#define SIT_ENTRY_PER_BLOCK (PAGE_CACHE_SIZE / sizeof(struct f2fs_sit_entry))
+#define SIT_ENTRY_PER_BLOCK (F2FS_BLKSIZE / sizeof(struct f2fs_sit_entry))
 
 /*
  * F2FS uses 4 bytes to represent block address. As a result, supported size of
@@ -1317,7 +1314,7 @@ typedef __le32	f2fs_hash_t;
 #define SIZE_OF_DIR_ENTRY	11	/* by byte */
 #define SIZE_OF_DENTRY_BITMAP	((NR_DENTRY_IN_BLOCK + BITS_PER_BYTE - 1) / \
 					BITS_PER_BYTE)
-#define SIZE_OF_RESERVED	(PAGE_SIZE - ((SIZE_OF_DIR_ENTRY + \
+#define SIZE_OF_RESERVED	(F2FS_BLKSIZE - ((SIZE_OF_DIR_ENTRY + \
 				F2FS_SLOT_LEN) * \
 				NR_DENTRY_IN_BLOCK + SIZE_OF_DENTRY_BITMAP))
 #define MIN_INLINE_DENTRY_SIZE		40	/* just include '.' and '..' entries */
@@ -1341,7 +1338,7 @@ struct f2fs_dentry_block {
 	__u8 filename[NR_DENTRY_IN_BLOCK][F2FS_SLOT_LEN];
 };
 
-static_assert(sizeof(struct f2fs_dentry_block) == 4096, "");
+static_assert(sizeof(struct f2fs_dentry_block) == F2FS_BLKSIZE, "");
 
 /* for inline stuff */
 #define DEF_INLINE_RESERVED_SIZE	1
@@ -1560,9 +1557,11 @@ blk_zone_cond_str(struct blk_zone *blkz)
 
 #endif
 
+struct blk_zone;
+
 extern int f2fs_get_zoned_model(int);
 extern int f2fs_get_zone_blocks(int);
-extern int f2fs_report_zone(int, uint64_t, void *);
+extern int f2fs_report_zone(int, uint64_t, struct blk_zone *);
 typedef int (report_zones_cb_t)(int i, void *, void *);
 extern int f2fs_report_zones(int, report_zones_cb_t *, void *);
 extern int f2fs_check_zones(int);

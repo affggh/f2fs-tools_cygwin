@@ -22,6 +22,8 @@
 #define HAVE_SYS_XATTR_H 1
 #define HAVE_UNISTD_H 1
 #define HAVE_UUID_UUID_H 1
+#define HAVE_CLOCK_GETTIME 1
+#define HAVE_CLOCK_BOOTTIME 1
 
 #define HAVE_FALLOCATE 1
 #define HAVE_FSETXATTR 1
@@ -67,6 +69,7 @@
 #define HAVE_GETMNTENT 1
 #define HAVE_LLSEEK 1
 #define HAVE_MEMSET 1
+#define HAVE_SPARSE_SPARSE_H 1
 #define HAVE_LIBLZ4 1
 
 #ifdef WITH_SLOAD
@@ -76,4 +79,5 @@
 
 #if defined(_WIN32)
 #define HAVE_LSEEK64
+#define HAVE_SPARSE_SPARSE_H 1
 #endif

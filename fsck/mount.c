@@ -812,12 +812,6 @@ int sanity_check_raw_super(struct f2fs_super_block *sb, enum SB_ADDR sb_addr)
 		return -1;
 	}
 
-	if (F2FS_BLKSIZE != PAGE_CACHE_SIZE) {
-		MSG(0, "Invalid page_cache_size (%d), supports only 4KB\n",
-			PAGE_CACHE_SIZE);
-		return -1;
-	}
-
 	blocksize = 1 << get_sb(log_blocksize);
 	if (F2FS_BLKSIZE != blocksize) {
 		MSG(0, "Invalid blocksize (%u), supports only 4KB\n",
@@ -975,49 +969,6 @@ int validate_super_block(struct f2fs_sb_info *sbi, enum SB_ADDR sb_addr)
 		MSG(0, "Info: MKFS version\n  \"%s\"\n", c.init_version);
 		MSG(0, "Info: FSCK version\n  from \"%s\"\n    to \"%s\"\n",
 					c.sb_version, c.version);
-#if defined(__APPLE__)
-		if (!c.no_kernel_check &&
-			memcmp(c.sb_version, c.version,	VERSION_NAME_LEN)) {
-			c.auto_fix = 0;
-			c.fix_on = 1;
-			memcpy(sbi->raw_super->version,
-					c.version, VERSION_NAME_LEN);
-			update_superblock(sbi->raw_super, SB_MASK(sb_addr));
-		}
-#else
-		if (!c.no_kernel_check) {
-			struct timespec t;
-			u32 prev_time, cur_time, time_diff;
-			__le32 *ver_ts_ptr = (__le32 *)(sbi->raw_super->version
-						+ VERSION_NAME_LEN);
-
-			t.tv_sec = t.tv_nsec = 0;
-			clock_gettime(CLOCK_REALTIME, &t);
-			cur_time = (u32)t.tv_sec;
-			prev_time = le32_to_cpu(*ver_ts_ptr);
-
-			MSG(0, "Info: version timestamp cur: %u, prev: %u\n",
-					cur_time, prev_time);
-			if (!memcmp(c.sb_version, c.version,
-						VERSION_NAME_LEN)) {
-				/* valid prev_time */
-				if (prev_time != 0 && cur_time > prev_time) {
-					time_diff = cur_time - prev_time;
-					if (time_diff < CHECK_PERIOD)
-						goto out;
-					c.auto_fix = 0;
-					c.fix_on = 1;
-				}
-			} else {
-				memcpy(sbi->raw_super->version,
-						c.version, VERSION_NAME_LEN);
-			}
-
-			*ver_ts_ptr = cpu_to_le32(cur_time);
-			update_superblock(sbi->raw_super, SB_MASK(sb_addr));
-		}
-out:
-#endif
 		print_sb_state(sbi->raw_super);
 		return 0;
 	}
@@ -1115,7 +1066,7 @@ static void *get_checkpoint_version(block_t cp_addr)
 {
 	void *cp_page;
 
-	cp_page = malloc(PAGE_SIZE);
+	cp_page = malloc(F2FS_BLKSIZE);
 	ASSERT(cp_page);
 
 	if (dev_read_block(cp_page, cp_addr) < 0)
@@ -1821,7 +1772,7 @@ static void read_compacted_summaries(struct f2fs_sb_info *sbi)
 
 	start = start_sum_block(sbi);
 
-	kaddr = (char *)malloc(PAGE_SIZE);
+	kaddr = malloc(F2FS_BLKSIZE);
 	ASSERT(kaddr);
 
 	ret = dev_read_block(kaddr, start++);
@@ -1854,9 +1805,9 @@ static void read_compacted_summaries(struct f2fs_sb_info *sbi)
 			curseg->sum_blk->entries[j] = *s;
 			offset += SUMMARY_SIZE;
 			if (offset + SUMMARY_SIZE <=
-					PAGE_CACHE_SIZE - SUM_FOOTER_SIZE)
+					F2FS_BLKSIZE - SUM_FOOTER_SIZE)
 				continue;
-			memset(kaddr, 0, PAGE_SIZE);
+			memset(kaddr, 0, F2FS_BLKSIZE);
 			ret = dev_read_block(kaddr, start++);
 			ASSERT(ret >= 0);
 			offset = 0;
@@ -1914,7 +1865,7 @@ static void read_normal_summaries(struct f2fs_sb_info *sbi, int type)
 			blk_addr = GET_SUM_BLKADDR(sbi, segno);
 	}
 
-	sum_blk = (struct f2fs_summary_block *)malloc(PAGE_SIZE);
+	sum_blk = malloc(sizeof(*sum_blk));
 	ASSERT(sum_blk);
 
 	ret = dev_read_block(sum_blk, blk_addr);
@@ -1924,7 +1875,7 @@ static void read_normal_summaries(struct f2fs_sb_info *sbi, int type)
 		restore_node_summary(sbi, segno, sum_blk);
 
 	curseg = CURSEG_I(sbi, type);
-	memcpy(curseg->sum_blk, sum_blk, PAGE_CACHE_SIZE);
+	memcpy(curseg->sum_blk, sum_blk, sizeof(*sum_blk));
 	reset_curseg(sbi, type);
 	free(sum_blk);
 }
@@ -1990,7 +1941,7 @@ static int build_curseg(struct f2fs_sb_info *sbi)
 	SM_I(sbi)->curseg_array = array;
 
 	for (i = 0; i < NR_CURSEG_TYPE; i++) {
-		array[i].sum_blk = calloc(PAGE_CACHE_SIZE, 1);
+		array[i].sum_blk = calloc(sizeof(*(array[i].sum_blk)), 1);
 		if (!array[i].sum_blk) {
 			MSG(1, "\tError: Calloc failed for build_curseg!!\n");
 			goto seg_cleanup;
@@ -3588,6 +3539,48 @@ int f2fs_do_mount(struct f2fs_sb_info *sbi)
 		return -1;
 	}
 
+	if (c.func == FSCK) {
+#if defined(__APPLE__)
+		if (!c.no_kernel_check &&
+			memcmp(c.sb_version, c.version,	VERSION_NAME_LEN)) {
+			c.auto_fix = 0;
+			c.fix_on = 1;
+			memcpy(sbi->raw_super->version,
+					c.version, VERSION_NAME_LEN);
+			update_superblock(sbi->raw_super, SB_MASK_ALL);
+		}
+#else
+		if (!c.no_kernel_check) {
+			u32 prev_time, cur_time, time_diff;
+			__le32 *ver_ts_ptr = (__le32 *)(sbi->raw_super->version
+						+ VERSION_NAME_LEN);
+
+			cur_time = (u32)get_cp(elapsed_time);
+			prev_time = le32_to_cpu(*ver_ts_ptr);
+
+			MSG(0, "Info: version timestamp cur: %u, prev: %u\n",
+					cur_time, prev_time);
+			if (!memcmp(c.sb_version, c.version,
+						VERSION_NAME_LEN)) {
+				/* valid prev_time */
+				if (prev_time != 0 && cur_time > prev_time) {
+					time_diff = cur_time - prev_time;
+					if (time_diff < CHECK_PERIOD)
+						goto out;
+					c.auto_fix = 0;
+					c.fix_on = 1;
+				}
+			} else {
+				memcpy(sbi->raw_super->version,
+						c.version, VERSION_NAME_LEN);
+			}
+
+			*ver_ts_ptr = cpu_to_le32(cur_time);
+			update_superblock(sbi->raw_super, SB_MASK_ALL);
+		}
+#endif
+	}
+out:
 	print_ckpt_info(sbi);
 
 	if (c.quota_fix) {
