@@ -1,0 +1,39 @@
+#cmake_minimum_required(VERSION 3.20)
+set(TARGET cutils)
+
+project(${TARGET})
+set(CMAKE_CXX_COMPILER clang)
+set(CMAKE_CXX_STANDARD 17)
+set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/../lib)
+
+set(CMAKE_CXX_FLAGS "-Werror -Wall -Wextra -D_GNU_SOURCE")
+include_directories(include ../include)
+
+set(SRC_LIST sockets.cpp
+        android_get_control_file.cpp
+        config_utils.cpp
+        canned_fs_config.cpp
+        iosched_policy.cpp
+        load_file.cpp
+        native_handle.cpp
+        record_stream.cpp
+        strlcpy.c
+        ashmem-host.cpp
+        fs_config.cpp
+        trace-host.cpp)
+
+if(UNIX OR APPLE)
+    set(SRC_LIST ${SRC_LIST} socket_inaddr_any_server_unix.cpp
+            socket_local_client_unix.cpp
+            socket_local_server_unix.cpp
+            socket_network_client_unix.cpp
+            sockets_unix.cpp)
+elseif(WIN32)
+    set(SRC_LIST ${SRC_LIST} socket_inaddr_any_server_windows.cpp
+            socket_network_client_windows.cpp.cpp
+            sockets_windows.cpp.cpp)
+    set(CMAKE_CXX_FLAGS "-lws2_32")
+endif ()
+
+add_library(${TARGET} ${SRC_LIST})
+target_link_libraries(${TARGET} log base)
