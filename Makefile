@@ -179,7 +179,7 @@ libcutils/.lib/libcutils.a:
 # and failed at final link...
 # issue solution at https://github.com/openssl/openssl/issues/19531
 openssl/libcrypto.a:
-	@cd openssl && ./Configure && $(MAKE)
+	@cd openssl && ./Configure && $(MAKE) -j$(shell nproc --all)
 
 lz4/lib/liblz4.a:
 	@$(MAKE) -C lz4
