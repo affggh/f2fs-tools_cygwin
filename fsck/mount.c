@@ -872,8 +872,13 @@ int sanity_check_raw_super(struct f2fs_super_block *sb, enum SB_ADDR sb_addr)
 	}
 
 	if (segment_count > (get_sb(block_count) >> 9)) {
-		MSG(0, "Wrong segment_count / block_count (%u > %llu)\n",
+		#if defined(__CYGWIN__)
+		MSG(0, "Wrong segment_count / block_count (%u > %lu)\n",
 			segment_count, get_sb(block_count));
+		#else
+			MSG(0, "Wrong segment_count / block_count (%u > %llu)\n",
+			segment_count, get_sb(block_count));
+		#endif
 		return 1;
 	}
 
