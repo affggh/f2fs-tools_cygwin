@@ -257,4 +257,4 @@ ifeq ($(shell [[ -f "openssl/Makefile" ]];echo $$?), 0)
 	@$(MAKE) -C openssl clean
 endif
 	@$(MAKE) -C lz4 clean
-
+	@find . -type f -name *.o | xargs $(RM)
