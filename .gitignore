@@ -51,3 +51,8 @@ stamp-h1
 # cscope files
 cscope.*
 ncscope.*
+
+# out files
+/bin
+obj
+.lib
