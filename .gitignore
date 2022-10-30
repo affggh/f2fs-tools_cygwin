@@ -34,11 +34,6 @@ aclocal.m4
 autoconf-[0-9].*
 autom4te.cache
 build-aux
-Makefile
-Makefile.in
-config.*
-configure
-configure.scan
 ltmain.sh
 libtool
 stamp-h
