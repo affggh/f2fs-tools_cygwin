@@ -30,10 +30,11 @@ CFLAGS = \
         -Wno-sign-compare
 
 ifeq ($(shell uname -o), Cygwin)
-CFLAGS += -D_WIN32 \
+# Should I use -D_WIN32 and -DANDROID_WINDOWS_HOST ?
+CFLAGS += \
 		  -Doff64_t=off_t \
-          -Dlseek64=lseek \
-		  -DANDROID_WINDOWS_HOST
+#          -Dlseek64=lseek 
+
 endif
 
 CXXFLAGS = \
@@ -182,7 +183,7 @@ openssl/libcrypto.a:
 	@cd openssl && ./Configure && $(MAKE) -j$(shell nproc --all)
 
 lz4/lib/liblz4.a:
-	@$(MAKE) -C lz4
+	@$(MAKE) -C lz4 lib
 
 obj/.lib/libz.a: $(ZLIB_OBJ)
 	@mkdir -p `dirname $@`
@@ -207,11 +208,11 @@ bin/make_f2fs$(EXT): $(MAKE_F2FS_OBJ) \
 	@echo -e "\033[95m\tSTRIP\t$@\033[0m"
 	@$(STRIP) $(STRIPFLAGS) $@
 
+# 					 openssl/libcrypto.a
 bin/sload_f2fs$(EXT): $(SLOAD_F2FS_OBJ) $(FSCK_MAIN_F2FS_OBJ) \
 					 e2fsprog/.lib/libext2_uuid.a \
 					 sparse/.lib/libsparse.a \
 					 base/.lib/libbase.a \
-					 openssl/libcrypto.a \
 					 libselinux/.lib/libselinux.a \
 					 libcutils/.lib/libcutils.a \
 					 liblog/.lib/liblog.a \
@@ -236,6 +237,7 @@ bin/fsck.f2fs$(EXT): $(FSCK_F2FS_OBJ) \
 	@$(STRIP) $(STRIPFLAGS) $@		 
 
 bin/cygwin1.dll:
+	@mkdir `dirname $@`
 	@echo -e "\033[96m\tCOPY\t`which cygwin1.dll` => $@\t\033[0m"
 	@cp -f `which cygwin1.dll` $@
 
@@ -254,7 +256,7 @@ endif
 	@$(MAKE) -C libselinux clean
 	@$(MAKE) -C libcutils clean
 ifeq ($(shell [[ -f "openssl/Makefile" ]];echo $$?), 0)
-	@$(MAKE) -C openssl clean
+#	@$(MAKE) -C openssl clean
 endif
 	@$(MAKE) -C lz4 clean
 	@find . -type f -name *.o | xargs $(RM)
