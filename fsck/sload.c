@@ -19,6 +19,11 @@
 #include <mntent.h>
 #endif
 
+#ifdef __CYGWIN__
+#define _MSC_VER
+#include "asprintf.h"
+#endif
+
 #ifdef HAVE_LIBSELINUX
 static struct selabel_handle *sehnd = NULL;
 #endif
@@ -28,7 +33,7 @@ typedef void (*fs_config_f)(const char *path, int dir,
 			    unsigned *uid, unsigned *gid,
 			    unsigned *mode, uint64_t *capabilities);
 
-#ifndef _WIN32
+#if !defined(_WIN32) || defined(__CYGWIN__)
 static fs_config_f fs_config_func = NULL;
 
 #ifdef HAVE_SELINUX_ANDROID_H
@@ -101,7 +106,7 @@ static int set_selinux_xattr(struct f2fs_sb_info *sbi, const char *path,
 #define set_selinux_xattr(...)	0
 #endif
 
-#ifndef _WIN32
+#if !defined(_WIN32) || defined(__CYGWIN__)
 static int set_perms_and_caps(struct dentry *de)
 {
 	uint64_t capabilities = 0;

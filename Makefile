@@ -3,8 +3,8 @@
 
 CC = clang
 CXX = clang++
-STRIP = strip
-AR = ar
+STRIP = llvm-strip
+AR = llvm-ar
 
 RM = rm -rf
 
@@ -30,11 +30,10 @@ CFLAGS = \
         -Wno-sign-compare
 
 ifeq ($(shell uname -o), Cygwin)
-# Should I use -D_WIN32 and -DANDROID_WINDOWS_HOST ?
-CFLAGS += \
+CFLAGS += -D_WIN32 \
 		  -Doff64_t=off_t \
-#          -Dlseek64=lseek 
-
+          -Dlseek64=lseek \
+		  -DANDROID_WINDOWS_HOST
 endif
 
 CXXFLAGS = \
@@ -180,10 +179,14 @@ libcutils/.lib/libcutils.a:
 # and failed at final link...
 # issue solution at https://github.com/openssl/openssl/issues/19531
 openssl/libcrypto.a:
-	@cd openssl && ./Configure && $(MAKE) -j$(shell nproc --all)
+	@cd openssl && ./Configure && $(MAKE)
+
+#libcrypto_utils/libcrypto.a:
+#	$(CXX) -stdlib=libc++ -std=c++17 -static -Wall -Werror -Wextra -Ilibcrypto_utils/include -c libcrypto_utils/android_pubkey.cpp
+#	$(AR) rcs libcrypto_utils/libcrypto.a libcrypto_utils/*.o
 
 lz4/lib/liblz4.a:
-	@$(MAKE) -C lz4 lib
+	@$(MAKE) -C lz4
 
 obj/.lib/libz.a: $(ZLIB_OBJ)
 	@mkdir -p `dirname $@`
@@ -208,7 +211,6 @@ bin/make_f2fs$(EXT): $(MAKE_F2FS_OBJ) \
 	@echo -e "\033[95m\tSTRIP\t$@\033[0m"
 	@$(STRIP) $(STRIPFLAGS) $@
 
-# 					 openssl/libcrypto.a
 bin/sload_f2fs$(EXT): $(SLOAD_F2FS_OBJ) $(FSCK_MAIN_F2FS_OBJ) \
 					 e2fsprog/.lib/libext2_uuid.a \
 					 sparse/.lib/libsparse.a \
@@ -237,7 +239,7 @@ bin/fsck.f2fs$(EXT): $(FSCK_F2FS_OBJ) \
 	@$(STRIP) $(STRIPFLAGS) $@		 
 
 bin/cygwin1.dll:
-	@mkdir `dirname $@`
+	@mkdir -p `dirname $@`
 	@echo -e "\033[96m\tCOPY\t`which cygwin1.dll` => $@\t\033[0m"
 	@cp -f `which cygwin1.dll` $@
 
@@ -259,4 +261,4 @@ ifeq ($(shell [[ -f "openssl/Makefile" ]];echo $$?), 0)
 #	@$(MAKE) -C openssl clean
 endif
 	@$(MAKE) -C lz4 clean
-	@find . -type f -name *.o | xargs $(RM)
+
